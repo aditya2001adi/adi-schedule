@@ -227,6 +227,42 @@
   <script type="text/babel">
     const { useState, useEffect, useRef } = React;
 
+    // ── JSONBin sync ─────────────────────────────────────────────────────────
+    // To enable cross-device sync:
+    //   1. Sign up free at https://jsonbin.io
+    //   2. Create a new bin with initial JSON:
+    //      {"weekKey":"","checks":{},"overrides":{},"history":{}}
+    //   3. Copy your Bin ID and X-Master-Key from the dashboard
+    //   4. Paste them into the two constants below
+    const JSONBIN_BIN_ID  = '';   // ← paste your Bin ID here
+    const JSONBIN_API_KEY = '';   // ← paste your X-Master-Key here
+    const JSONBIN_URL = JSONBIN_BIN_ID
+      ? `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`
+      : '';
+
+    async function fetchRemote() {
+      if (!JSONBIN_BIN_ID || !JSONBIN_API_KEY) return null;
+      try {
+        const res = await fetch(`${JSONBIN_URL}/latest`, {
+          headers: { 'X-Master-Key': JSONBIN_API_KEY }
+        });
+        if (!res.ok) return null;
+        const data = await res.json();
+        return data.record;
+      } catch { return null; }
+    }
+
+    async function pushRemote(payload) {
+      if (!JSONBIN_BIN_ID || !JSONBIN_API_KEY) return;
+      try {
+        await fetch(JSONBIN_URL, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
+          body: JSON.stringify(payload),
+        });
+      } catch {}
+    }
+
     const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
     const schedule = {
@@ -415,6 +451,47 @@
       return { start, end, duration: (end - start) / 60 };
     }
 
+    // Convert ISO week key (e.g. "2026-W12") to a Date for that Monday
+    function weekKeyToMonday(weekKey) {
+      const [yearStr, weekStr] = weekKey.split('-W');
+      const year = parseInt(yearStr), week = parseInt(weekStr);
+      const jan4 = new Date(Date.UTC(year, 0, 4));
+      const jan4dow = jan4.getUTCDay() || 7;
+      const monday = new Date(jan4);
+      monday.setUTCDate(jan4.getUTCDate() - (jan4dow - 1) + (week - 1) * 7);
+      return monday;
+    }
+
+    function weekKeyToLabel(weekKey) {
+      const monday = weekKeyToMonday(weekKey);
+      return monday.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+    }
+
+    // Compute weekly summary from raw checks + overrides (used for history archival)
+    function computeWeekSummary(weekKey, checksData, overridesData) {
+      const monday = weekKeyToMonday(weekKey);
+      const hours = {};
+      legend.forEach(cat => hours[cat] = 0);
+      let blocksCompleted = 0, totalBlocks = 0;
+      days.forEach((dayName, dayIdx) => {
+        const dayDate = new Date(monday);
+        dayDate.setUTCDate(monday.getUTCDate() + dayIdx);
+        const dateStr = dayDate.toISOString().slice(0, 10);
+        schedule[dayName].blocks.forEach((block, i) => {
+          if (block.category === 'break') return;
+          totalBlocks++;
+          if (checksData && checksData[`${dayName}-${i}`]) {
+            blocksCompleted++;
+            const ov = overridesData && overridesData[`${dateStr}-${i}`];
+            const effectiveCat = ov ? ov.category : block.category;
+            const t = parseBlockTime(block.time);
+            if (t && hours[effectiveCat] !== undefined) hours[effectiveCat] += t.duration;
+          }
+        });
+      });
+      return { weekOf: weekKeyToLabel(weekKey), hours, blocksCompleted, totalBlocks };
+    }
+
     // ── Override Modal ────────────────────────────────────────────────────────
 
     function OverrideModal({ block, dayName, idx, overrides, onApply, onReset, onClose }) {
@@ -562,10 +639,56 @@
 
       const [editingBlock, setEditingBlock] = useState(null); // { day, idx }
 
+      const [history, setHistory] = useState(() => {
+        try { return JSON.parse(localStorage.getItem('schedule-history-v1') || '{}'); }
+        catch { return {}; }
+      });
+      const [syncStatus, setSyncStatus] = useState(JSONBIN_BIN_ID ? 'loading' : 'unconfigured');
+      const syncTimerRef = useRef(null);
+
       useEffect(() => {
         const id = setInterval(() => setNowMinutes(getCurrentMinutes()), 60000);
         return () => clearInterval(id);
       }, []);
+
+      // Fetch remote on mount — detect week rollover, merge state
+      useEffect(() => {
+        if (!JSONBIN_BIN_ID) return;
+        fetchRemote().then(remote => {
+          if (!remote) { setSyncStatus('offline'); return; }
+          let updatedChecks   = remote.checks   || {};
+          let updatedOverrides = remote.overrides || {};
+          let updatedHistory  = remote.history  || {};
+          // Week rolled over since last device synced — archive old week
+          if (remote.weekKey && remote.weekKey !== weekKey) {
+            const summary = computeWeekSummary(remote.weekKey, remote.checks, remote.overrides);
+            updatedHistory = { ...updatedHistory, [remote.weekKey]: summary };
+            updatedChecks = {};
+            pushRemote({ weekKey, checks: updatedChecks, overrides: updatedOverrides, history: updatedHistory });
+          }
+          setChecks(updatedChecks);
+          setOverrides(updatedOverrides);
+          setHistory(updatedHistory);
+          setSyncStatus('synced');
+          try {
+            localStorage.setItem(`schedule-v1-${weekKey}`, JSON.stringify(updatedChecks));
+            localStorage.setItem('schedule-overrides-v1', JSON.stringify(updatedOverrides));
+            localStorage.setItem('schedule-history-v1', JSON.stringify(updatedHistory));
+          } catch {}
+        }).catch(() => setSyncStatus('offline'));
+      }, []);
+
+      function schedulePush(newChecks, newOverrides, newHistory) {
+        if (!JSONBIN_BIN_ID) return;
+        if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+        setSyncStatus('syncing');
+        syncTimerRef.current = setTimeout(async () => {
+          try {
+            await pushRemote({ weekKey, checks: newChecks, overrides: newOverrides, history: newHistory });
+            setSyncStatus('synced');
+          } catch { setSyncStatus('error'); }
+        }, 2000);
+      }
 
       function toggleCheck(day, idx) {
         const key = `${day}-${idx}`;
@@ -573,6 +696,7 @@
         if (next[key]) { delete next[key]; } else { next[key] = true; }
         setChecks(next);
         try { localStorage.setItem(`schedule-v1-${weekKey}`, JSON.stringify(next)); } catch {}
+        schedulePush(next, overrides, history);
       }
 
       function applyOverride(dayName, idx, category, customText) {
@@ -581,6 +705,7 @@
         setOverrides(next);
         try { localStorage.setItem('schedule-overrides-v1', JSON.stringify(next)); } catch {}
         setEditingBlock(null);
+        schedulePush(checks, next, history);
       }
 
       function resetOverride(dayName, idx) {
@@ -590,6 +715,7 @@
         setOverrides(next);
         try { localStorage.setItem('schedule-overrides-v1', JSON.stringify(next)); } catch {}
         setEditingBlock(null);
+        schedulePush(checks, next, history);
       }
 
       // Returns the block as it should be displayed (with override applied)
@@ -650,29 +776,92 @@
             </div>
           </div>
 
-          {/* Day Tabs */}
-          <div className="max-w-3xl mx-auto mb-8 flex flex-wrap gap-1">
-            {days.map(d => (
+          {/* Day Tabs + Sync Indicator */}
+          <div className="max-w-3xl mx-auto mb-8">
+            <div className="flex flex-wrap gap-1 items-center">
+              {days.map(d => (
+                <button
+                  key={d}
+                  onClick={() => setActiveDay(d)}
+                  className={`px-3 py-1\.5 text-sm rounded transition-all ${activeDay === d ? "active-day" : "inactive-day"}`}
+                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: '1.4' }}
+                >
+                  {d.slice(0, 3)}
+                  {d === todayName && (
+                    <span style={{
+                      display: 'block', width: '4px', height: '4px', borderRadius: '50%',
+                      background: activeDay === d ? '#71717a' : '#fbbf24',
+                      margin: '3px auto 0',
+                    }} />
+                  )}
+                </button>
+              ))}
               <button
-                key={d}
-                onClick={() => setActiveDay(d)}
-                className={`px-3 py-1\.5 text-sm rounded transition-all ${activeDay === d ? "active-day" : "inactive-day"}`}
-                style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: '1.4' }}
+                onClick={() => setActiveDay('History')}
+                className={`px-3 py-1\.5 text-sm rounded transition-all ${activeDay === 'History' ? "active-day" : "inactive-day"}`}
               >
-                {d.slice(0, 3)}
-                {d === todayName && (
-                  <span style={{
-                    display: 'block', width: '4px', height: '4px', borderRadius: '50%',
-                    background: activeDay === d ? '#71717a' : '#fbbf24',
-                    margin: '3px auto 0',
-                  }} />
-                )}
+                Hist
               </button>
-            ))}
+              <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center' }}>
+                {syncStatus === 'unconfigured' && <span style={{ fontSize: '10px', color: '#3f3f46', fontFamily: 'monospace' }}>sync off</span>}
+                {syncStatus === 'loading'      && <span style={{ fontSize: '10px', color: '#71717a', fontFamily: 'monospace' }}>⊙ loading</span>}
+                {syncStatus === 'syncing'      && <span style={{ fontSize: '10px', color: '#fbbf24', fontFamily: 'monospace' }}>⊙ syncing…</span>}
+                {syncStatus === 'synced'       && <span style={{ fontSize: '10px', color: '#34d399', fontFamily: 'monospace' }}>✓ synced</span>}
+                {syncStatus === 'offline'      && <span style={{ fontSize: '10px', color: '#71717a', fontFamily: 'monospace' }}>○ offline</span>}
+                {syncStatus === 'error'        && <span style={{ fontSize: '10px', color: '#fb7185', fontFamily: 'monospace' }}>✗ error</span>}
+              </div>
+            </div>
           </div>
 
+          {/* History View */}
+          {activeDay === 'History' && (
+            <div className="max-w-3xl mx-auto">
+              <div className="mb-6">
+                <h2 className="text-2xl font-bold text-zinc-100">History</h2>
+                <p className="text-zinc-500 text-sm mt-0\.5 italic">Past weeks' completion</p>
+              </div>
+              {Object.keys(history).length === 0 ? (
+                <p className="text-zinc-500 text-sm italic">No history yet — complete your first week to see it here.</p>
+              ) : (
+                <div className="space-y-3">
+                  {Object.keys(history).sort().reverse().map(wk => {
+                    const s = history[wk];
+                    return (
+                      <div key={wk} className="rounded-lg border border-zinc-800 bg-zinc-900 px-5 py-4">
+                        <div className="flex items-baseline justify-between mb-4">
+                          <p className="text-zinc-100 font-semibold text-base">Week of {s.weekOf}</p>
+                          <p className="text-zinc-500 text-xs font-mono">{s.blocksCompleted} / {s.totalBlocks} blocks</p>
+                        </div>
+                        <div className="grid grid-cols-2 md-grid-cols-6 gap-3">
+                          {legend.map(cat => {
+                            const c = categoryColors[cat];
+                            const hex = categoryAccentHex[cat];
+                            const actual = Math.round((s.hours[cat] || 0) * 10) / 10;
+                            const target = weeklyTargets[cat];
+                            const pct = Math.min(actual / target, 1);
+                            return (
+                              <div key={cat} className={`rounded border ${c.border} ${c.bg} px-3 py-2`}>
+                                <p className={`text-xs font-semibold ${c.text} mb-1`}>{categoryLabels[cat]}</p>
+                                <p className="text-zinc-300 text-sm font-mono">
+                                  {actual} <span className="text-zinc-600">/ {target} hrs</span>
+                                </p>
+                                <div className="progress-track">
+                                  <div className="progress-fill" style={{ width: `${pct * 100}%`, background: hex }} />
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Day View */}
-          <div className="max-w-3xl mx-auto">
+          {activeDay !== 'History' && <div className="max-w-3xl mx-auto">
             <div className="mb-6">
               <h2 className="text-2xl font-bold text-zinc-100">
                 {activeDay}
@@ -777,7 +966,7 @@
                 <p className="text-zinc-400 text-sm italic">Sunday does double duty — test review in the morning while it's fresh enough to be useful but distant enough to not feel brutal, then a proper weekly reset. The review and weekly planning are the two non-negotiables; everything else is flex.</p>
               </div>
             )}
-          </div>
+          </div>}
 
           {/* Weekly Scoreboard */}
           <div className="max-w-3xl mx-auto mt-12 border-t border-zinc-800 pt-8">

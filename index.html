@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Adi's Weekly Schedule</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #09090b; color: #f4f4f5; font-family: Georgia, 'Times New Roman', serif; }
+    .space-y-3 > * + * { margin-top: 0.75rem; }
+    .flex { display: flex; }
+    .flex-wrap { flex-wrap: wrap; }
+    .flex-1 { flex: 1; }
+    .flex-shrink-0 { flex-shrink: 0; }
+    .items-start { align-items: flex-start; }
+    .items-center { align-items: center; }
+    .items-baseline { align-items: baseline; }
+    .justify-between { justify-content: space-between; }
+    .gap-1 { gap: 0.25rem; }
+    .gap-1\.5 { gap: 0.375rem; }
+    .gap-2 { gap: 0.5rem; }
+    .gap-3 { gap: 0.75rem; }
+    .gap-4 { gap: 1rem; }
+    .grid { display: grid; }
+    .min-h-screen { min-height: 100vh; }
+    .min-w-0 { min-width: 0; }
+    .max-w-3xl { max-width: 48rem; }
+    .mx-auto { margin-left: auto; margin-right: auto; }
+    .mb-1 { margin-bottom: 0.25rem; }
+    .mb-4 { margin-bottom: 1rem; }
+    .mb-6 { margin-bottom: 1.5rem; }
+    .mb-8 { margin-bottom: 2rem; }
+    .mb-10 { margin-bottom: 2.5rem; }
+    .mt-0\.5 { margin-top: 0.125rem; }
+    .mt-1\.5 { margin-top: 0.375rem; }
+    .mt-6 { margin-top: 1.5rem; }
+    .mt-8 { margin-top: 2rem; }
+    .mt-12 { margin-top: 3rem; }
+    .mt-5 { margin-top: 1.25rem; }
+    .p-6 { padding: 1.5rem; }
+    .px-3 { padding-left: 0.75rem; padding-right: 0.75rem; }
+    .px-4 { padding-left: 1rem; padding-right: 1rem; }
+    .px-5 { padding-left: 1.25rem; padding-right: 1.25rem; }
+    .py-1\.5 { padding-top: 0.375rem; padding-bottom: 0.375rem; }
+    .py-3 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+    .py-4 { padding-top: 1rem; padding-bottom: 1rem; }
+    .pt-8 { padding-top: 2rem; }
+    .text-xs { font-size: 0.75rem; line-height: 1rem; }
+    .text-sm { font-size: 0.875rem; line-height: 1.25rem; }
+    .text-base { font-size: 1rem; line-height: 1.5rem; }
+    .text-2xl { font-size: 1.5rem; line-height: 2rem; }
+    .text-4xl { font-size: 2.25rem; line-height: 2.5rem; }
+    .font-semibold { font-weight: 600; }
+    .font-bold { font-weight: 700; }
+    .font-mono { font-family: monospace; }
+    .italic { font-style: italic; }
+    .uppercase { text-transform: uppercase; }
+    .tracking-wide { letter-spacing: 0.025em; }
+    .tracking-widest { letter-spacing: 0.1em; }
+    .rounded { border-radius: 0.25rem; }
+    .rounded-full { border-radius: 9999px; }
+    .rounded-lg { border-radius: 0.5rem; }
+    .border { border-width: 1px; border-style: solid; }
+    .border-t { border-top-width: 1px; border-top-style: solid; }
+    .w-2 { width: 0.5rem; }
+    .w-2\.5 { width: 0.625rem; }
+    .h-2 { height: 0.5rem; }
+    .h-2\.5 { height: 0.625rem; }
+    button { cursor: pointer; border: none; background: none; font-family: inherit; }
+    button:hover { opacity: 0.9; }
+
+    /* Colors */
+    .bg-zinc-950 { background-color: #09090b; }
+    .bg-zinc-900 { background-color: #18181b; }
+    .bg-zinc-800 { background-color: #27272a; }
+    .bg-zinc-100 { background-color: #f4f4f5; }
+    .bg-zinc-500 { background-color: #71717a; }
+    .bg-amber-950 { background-color: #1c1003; }
+    .bg-amber-400 { background-color: #fbbf24; }
+    .bg-sky-950 { background-color: #020617; }
+    .bg-sky-400 { background-color: #38bdf8; }
+    .bg-violet-950 { background-color: #1e0a3c; }
+    .bg-violet-400 { background-color: #a78bfa; }
+    .bg-emerald-950 { background-color: #022c22; }
+    .bg-emerald-400 { background-color: #34d399; }
+    .bg-rose-950 { background-color: #1a0010; }
+    .bg-rose-400 { background-color: #fb7185; }
+    .bg-orange-950 { background-color: #1a0a00; }
+    .bg-orange-400 { background-color: #fb923c; }
+    .bg-amber-950-30 { background-color: rgba(28,16,3,0.3); }
+
+    .text-zinc-100 { color: #f4f4f5; }
+    .text-zinc-300 { color: #d4d4d8; }
+    .text-zinc-400 { color: #a1a1aa; }
+    .text-zinc-500 { color: #71717a; }
+    .text-zinc-600 { color: #52525b; }
+    .text-zinc-900 { color: #18181b; }
+    .text-amber-400 { color: #fbbf24; }
+    .text-amber-300-80 { color: rgba(253,230,138,0.8); }
+    .text-sky-400 { color: #38bdf8; }
+    .text-violet-400 { color: #a78bfa; }
+    .text-emerald-400 { color: #34d399; }
+    .text-rose-400 { color: #fb7185; }
+    .text-orange-400 { color: #fb923c; }
+
+    .border-zinc-700-40 { border-color: rgba(63,63,70,0.4); }
+    .border-zinc-600-30 { border-color: rgba(82,82,91,0.3); }
+    .border-zinc-800 { border-color: #27272a; }
+    .border-amber-400-30 { border-color: rgba(251,191,36,0.3); }
+    .border-amber-400-20 { border-color: rgba(251,191,36,0.2); }
+    .border-sky-400-30 { border-color: rgba(56,189,248,0.3); }
+    .border-violet-400-30 { border-color: rgba(167,139,250,0.3); }
+    .border-emerald-400-30 { border-color: rgba(52,211,153,0.3); }
+    .border-rose-400-30 { border-color: rgba(251,113,133,0.3); }
+    .border-orange-400-30 { border-color: rgba(251,146,60,0.3); }
+
+    .grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    @media (min-width: 768px) {
+      .p-6 { padding: 2.5rem; }
+      .md-grid-cols-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+    }
+
+    .transition-all { transition: all 0.15s ease; }
+    .active-day { background-color: #f4f4f5; color: #18181b; font-weight: 600; }
+    .inactive-day { color: #a1a1aa; }
+    .inactive-day:hover { color: #e4e4e7; background-color: #27272a; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState } = React;
+
+    const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+    const schedule = {
+      Monday: {
+        theme: "Deep Work Day",
+        blocks: [
+          { time: "11:00am – 1:30pm", activity: "LSAT Prep", detail: "Full passage set (RC focus) + timed drills", category: "lsat" },
+          { time: "1:30 – 2:30pm", activity: "Lunch", detail: "Real break — step away from the screen", category: "break" },
+          { time: "2:30 – 4:30pm", activity: "Job Search", detail: "Active applications, company research, new roles", category: "jobs" },
+          { time: "4:30 – 6:00pm", activity: "Run + Shower", detail: "Out the door by 4:30 — back and cleaned up by 6", category: "run" },
+          { time: "6:00 – 7:00pm", activity: "Claude Code", detail: "Your Ballot 2026 or personal site work", category: "code" },
+          { time: "7:00 – 8:00pm", activity: "Dinner", detail: "Full stop — no screens if possible", category: "break" },
+          { time: "8:00 – 9:00pm", activity: "Job Search", detail: "Evening sweep — new postings, quick follow-ups, LinkedIn", category: "jobs" },
+          { time: "9:00 – 10:00pm", activity: "Claude Code (cont.)", detail: "Pick back up or wrap if done", category: "code" },
+          { time: "10:00 – 11:00pm", activity: "Reading", detail: "Wind down — books, long-form, whatever you're into", category: "reading" },
+        ],
+      },
+      Tuesday: {
+        theme: "Scholarship Day",
+        blocks: [
+          { time: "11:00am – 1:30pm", activity: "LSAT Prep", detail: "Logic games + LR targeted review", category: "lsat" },
+          { time: "1:30 – 2:30pm", activity: "Lunch", detail: "Real break — step away from the screen", category: "break" },
+          { time: "2:30 – 4:30pm", activity: "Substack Writing", detail: "Draft, outline, or deep research for essay", category: "substack" },
+          { time: "4:30 – 6:00pm", activity: "Run + Shower", detail: "Out the door by 4:30 — back and cleaned up by 6", category: "run" },
+          { time: "6:00 – 7:00pm", activity: "Job Search", detail: "Interview prep, follow-ups, networking messages", category: "jobs" },
+          { time: "7:00 – 8:00pm", activity: "Dinner", detail: "Full stop — no screens if possible", category: "break" },
+          { time: "8:00 – 9:30pm", activity: "Substack Writing (cont.)", detail: "Edit, refine, or get a draft closer to done", category: "substack" },
+          { time: "9:30 – 10:00pm", activity: "Job Search", detail: "Evening sweep — new postings, quick follow-ups", category: "jobs" },
+          { time: "10:00 – 11:00pm", activity: "Reading", detail: "Wind down — current events, law, policy, or pleasure", category: "reading" },
+        ],
+      },
+      Wednesday: {
+        theme: "Build Day",
+        blocks: [
+          { time: "11:00am – 1:30pm", activity: "LSAT Prep", detail: "Full RC section timed — track early passage pace specifically", category: "lsat" },
+          { time: "1:30 – 2:30pm", activity: "Lunch", detail: "Real break — step away from the screen", category: "break" },
+          { time: "2:30 – 4:30pm", activity: "Claude Code", detail: "Long build session — new feature, project, or experiment", category: "code" },
+          { time: "4:30 – 6:00pm", activity: "Run + Shower", detail: "Out the door by 4:30 — back and cleaned up by 6", category: "run" },
+          { time: "6:00 – 7:00pm", activity: "Job Search", detail: "Mid-week check — new roles, any responses to handle", category: "jobs" },
+          { time: "7:00 – 8:00pm", activity: "Dinner", detail: "Full stop — no screens if possible", category: "break" },
+          { time: "8:00 – 10:00pm", activity: "Claude Code (cont.)", detail: "Pick back up — longer evening build if momentum is there", category: "code" },
+          { time: "10:00 – 11:00pm", activity: "Reading", detail: "Wind down — free read, whatever you're into", category: "reading" },
+        ],
+      },
+      Thursday: {
+        theme: "Writing Day",
+        blocks: [
+          { time: "11:00am – 1:30pm", activity: "LSAT Prep", detail: "Full section — LR or RC, with full review after", category: "lsat" },
+          { time: "1:30 – 2:30pm", activity: "Lunch", detail: "Real break — step away from the screen", category: "break" },
+          { time: "2:30 – 4:30pm", activity: "Substack Writing", detail: "Editing, polishing, or publishing a piece", category: "substack" },
+          { time: "4:30 – 6:00pm", activity: "Run + Shower", detail: "Out the door by 4:30 — back and cleaned up by 6", category: "run" },
+          { time: "6:00 – 7:00pm", activity: "Job Search", detail: "End of week push — applications, prep for any Friday calls", category: "jobs" },
+          { time: "7:00 – 8:00pm", activity: "Dinner", detail: "Full stop — no screens if possible", category: "break" },
+          { time: "8:00 – 9:30pm", activity: "Claude Code", detail: "Lighter session — fixes, polish, small experiments", category: "code" },
+          { time: "9:30 – 10:00pm", activity: "Job Search", detail: "Evening sweep — new postings, quick follow-ups", category: "jobs" },
+          { time: "10:00 – 11:00pm", activity: "Reading", detail: "Wind down — long-form essays or books", category: "reading" },
+        ],
+      },
+      Friday: {
+        theme: "Job Search Heavy",
+        blocks: [
+          { time: "11:00am – 1:00pm", activity: "LSAT Prep", detail: "Shorter session — one targeted weak area only", category: "lsat" },
+          { time: "1:00 – 2:30pm", activity: "Lunch + Break", detail: "Longer midday reset", category: "break" },
+          { time: "2:30 – 4:30pm", activity: "Job Search", detail: "Applications, networking calls, follow-ups", category: "jobs" },
+          { time: "4:30 – 6:00pm", activity: "Run + Shower", detail: "Out the door by 4:30 — back and cleaned up by 6", category: "run" },
+          { time: "6:00 – 7:00pm", activity: "Job Search", detail: "Final sweep of the week — anything outstanding", category: "jobs" },
+          { time: "7:00 – 8:00pm", activity: "Dinner", detail: "Full stop — no screens if possible", category: "break" },
+          { time: "8:00 – 11:00pm", activity: "Off / Social", detail: "Friday night — Catan, friends, fully unstructured", category: "break" },
+        ],
+      },
+      Saturday: {
+        theme: "Practice Test Day",
+        blocks: [
+          { time: "11:00am – 2:30pm", activity: "Full Practice LSAT", detail: "Timed under real conditions — phone off, no interruptions", category: "lsat" },
+          { time: "2:30 – 4:00pm", activity: "Lunch + Full Break", detail: "Decompress — you're done with the hard stuff", category: "break" },
+          { time: "4:00 – 6:00pm", activity: "Off / Flex", detail: "Fully unstructured — walk, nap, whatever sounds good", category: "break" },
+          { time: "6:00 – 7:00pm", activity: "Run + Shower", detail: "Good physical reset after a mentally heavy day", category: "run" },
+          { time: "7:00 – 8:00pm", activity: "Dinner", detail: "Full stop", category: "break" },
+          { time: "8:00 – 9:30pm", activity: "Job Search", detail: "Light sweep — new postings, nothing intensive", category: "jobs" },
+          { time: "9:30 – 10:00pm", activity: "Flex", detail: "Whatever — fully optional", category: "break" },
+          { time: "10:00 – 11:00pm", activity: "Reading", detail: "Wind down — pleasure reading only, zero work material", category: "reading" },
+        ],
+      },
+      Sunday: {
+        theme: "Review + Reset",
+        blocks: [
+          { time: "11:00am – 1:00pm", activity: "Test Review", detail: "Diagnose every mistake from Saturday's test — RC early passages especially", category: "lsat" },
+          { time: "1:00 – 2:00pm", activity: "Lunch", detail: "Real break after review", category: "break" },
+          { time: "2:00 – 3:30pm", activity: "Weekly Review", detail: "What moved forward? What's the plan for next week?", category: "jobs" },
+          { time: "3:30 – 5:00pm", activity: "Off / Flex", detail: "Unstructured — birdwatch, Catan, walk, whatever", category: "break" },
+          { time: "5:00 – 6:30pm", activity: "Substack / Flex", detail: "Light writing or nothing — zero pressure", category: "substack" },
+          { time: "6:30 – 7:00pm", activity: "Job Search", detail: "Sunday sweep — new roles posted over the weekend", category: "jobs" },
+          { time: "7:00 – 8:00pm", activity: "Dinner", detail: "Full stop", category: "break" },
+          { time: "8:00 – 10:00pm", activity: "Off / Flex", detail: "Wind down into the week — keep it easy", category: "break" },
+          { time: "10:00 – 11:00pm", activity: "Reading", detail: "Wind down — set yourself up mentally for Monday", category: "reading" },
+        ],
+      },
+    };
+
+    const categoryColors = {
+      lsat:     { bg: "bg-amber-950",   accent: "bg-amber-400",   text: "text-amber-400",   border: "border-amber-400-30" },
+      jobs:     { bg: "bg-sky-950",     accent: "bg-sky-400",     text: "text-sky-400",     border: "border-sky-400-30" },
+      substack: { bg: "bg-violet-950",  accent: "bg-violet-400",  text: "text-violet-400",  border: "border-violet-400-30" },
+      code:     { bg: "bg-emerald-950", accent: "bg-emerald-400", text: "text-emerald-400", border: "border-emerald-400-30" },
+      reading:  { bg: "bg-rose-950",    accent: "bg-rose-400",    text: "text-rose-400",    border: "border-rose-400-30" },
+      run:      { bg: "bg-orange-950",  accent: "bg-orange-400",  text: "text-orange-400",  border: "border-orange-400-30" },
+      break:    { bg: "bg-zinc-900",    accent: "bg-zinc-500",    text: "text-zinc-400",    border: "border-zinc-600-30" },
+    };
+
+    const categoryLabels = {
+      lsat: "LSAT", jobs: "Job Search", substack: "Substack",
+      code: "Claude Code", reading: "Reading", run: "Run + Shower",
+    };
+
+    const weeklyHours = {
+      lsat: "12–14 hrs", jobs: "10–12 hrs", substack: "4–5 hrs",
+      code: "5–7 hrs", reading: "7 hrs", run: "6 hrs",
+    };
+
+    const legend = ["lsat", "jobs", "substack", "code", "reading", "run"];
+
+    function App() {
+      const [activeDay, setActiveDay] = useState("Monday");
+      const day = schedule[activeDay];
+
+      return (
+        <div className="min-h-screen bg-zinc-950 p-6">
+          {/* Header */}
+          <div className="max-w-3xl mx-auto mb-10">
+            <p className="text-zinc-500 text-xs tracking-widest uppercase mb-1">Weekly Structure</p>
+            <h1 className="text-4xl font-bold text-zinc-100 mb-1">Adi's Schedule</h1>
+            <p className="text-zinc-400 text-base">Pre-April LSAT · Active Job Search · 11am – 11pm</p>
+            <div className="flex flex-wrap gap-3 mt-5">
+              {legend.map(cat => (
+                <div key={cat} className="flex items-center gap-1.5">
+                  <div className={`w-2\.5 h-2\.5 rounded-full ${categoryColors[cat].accent}`} />
+                  <span className="text-zinc-400 text-xs tracking-wide">{categoryLabels[cat]}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Day Tabs */}
+          <div className="max-w-3xl mx-auto mb-8 flex flex-wrap gap-1">
+            {days.map(d => (
+              <button
+                key={d}
+                onClick={() => setActiveDay(d)}
+                className={`px-3 py-1\.5 text-sm rounded transition-all ${activeDay === d ? "active-day" : "inactive-day"}`}
+              >
+                {d.slice(0, 3)}
+              </button>
+            ))}
+          </div>
+
+          {/* Day View */}
+          <div className="max-w-3xl mx-auto">
+            <div className="mb-6">
+              <h2 className="text-2xl font-bold text-zinc-100">{activeDay}</h2>
+              <p className="text-zinc-500 text-sm mt-0\.5 italic">{day.theme}</p>
+            </div>
+
+            <div className="space-y-3">
+              {day.blocks.map((block, i) => {
+                const c = categoryColors[block.category];
+                return (
+                  <div key={i} className={`rounded-lg border ${c.border} ${c.bg} px-5 py-4 flex items-start gap-4`}>
+                    <div className="mt-1\.5 flex-shrink-0">
+                      <div className={`w-2 h-2 rounded-full ${c.accent}`} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-baseline justify-between gap-2 flex-wrap">
+                        <span className={`text-base font-semibold ${c.text}`}>{block.activity}</span>
+                        <span className="text-zinc-500 text-xs font-mono">{block.time}</span>
+                      </div>
+                      <p className="text-zinc-300 text-sm mt-0\.5">{block.detail}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {activeDay === "Saturday" && (
+              <div className="mt-6 rounded-lg border border-amber-400-20 bg-amber-950-30 px-5 py-4">
+                <p className="text-amber-300-80 text-sm italic">Saturday is the most important LSAT day of the week. Treat it like the real test — same time of day, no phone, no music. Review happens Sunday when you're fresh.</p>
+              </div>
+            )}
+            {activeDay === "Sunday" && (
+              <div className="mt-6 rounded-lg border border-zinc-700-40 bg-zinc-900 px-5 py-4">
+                <p className="text-zinc-400 text-sm italic">Sunday does double duty — test review in the morning while it's fresh enough to be useful but distant enough to not feel brutal, then a proper weekly reset. The review and weekly planning are the two non-negotiables; everything else is flex.</p>
+              </div>
+            )}
+          </div>
+
+          {/* Weekly allocation */}
+          <div className="max-w-3xl mx-auto mt-12 border-t border-zinc-800 pt-8">
+            <p className="text-zinc-500 text-xs uppercase tracking-widest mb-4">Weekly allocation (approx.)</p>
+            <div className="grid grid-cols-2 md-grid-cols-6 gap-3">
+              {legend.map(cat => {
+                const c = categoryColors[cat];
+                return (
+                  <div key={cat} className={`rounded-lg border ${c.border} ${c.bg} px-4 py-3`}>
+                    <p className={`text-xs font-semibold ${c.text} mb-1`}>{categoryLabels[cat]}</p>
+                    <p className="text-zinc-300 text-sm font-mono">{weeklyHours[cat]}</p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <p className="max-w-3xl mx-auto mt-8 text-zinc-600 text-xs">
+            Adjust Friday's LSAT block down if you have an interview that week. Everything except Saturday's practice test is flexible — the structure matters more than the exact times.
+          </p>
+        </div>
+      );
+    }
+
+    ReactDOM.render(<App />, document.getElementById("root"));
+  </script>
+</body>
+</html>

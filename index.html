@@ -161,12 +161,18 @@
       transition: width 0.5s ease;
     }
 
-    /* Block hover */
+    /* Block hover + drag */
     .block-card {
       transition: opacity 0.2s ease, box-shadow 0.3s ease, filter 0.15s ease;
     }
     .block-card:hover {
       filter: brightness(1.06);
+    }
+    .block-card[draggable="true"] { cursor: grab; }
+    .block-card[draggable="true"]:active { cursor: grabbing; }
+    .block-card.drag-over {
+      outline: 2px dashed rgba(255,255,255,0.25);
+      outline-offset: -2px;
     }
 
     /* Modal */
@@ -451,6 +457,30 @@
       return { start, end, duration: (end - start) / 60 };
     }
 
+    // Convert minutes since midnight back to a time string like "2:30 – 4:30pm"
+    function minutesToTimeString(start, end) {
+      function fmt(mins) {
+        const totalH = Math.floor(mins / 60);
+        const m = mins % 60;
+        const h = totalH % 12 === 0 ? 12 : totalH % 12;
+        const mer = totalH < 12 ? 'am' : 'pm';
+        return `${h}:${String(m).padStart(2, '0')}${mer}`;
+      }
+      // Only show meridiem on end, omit on start if same period and start != 12
+      const startH = Math.floor(start / 60);
+      const endH = Math.floor(end / 60);
+      const startMer = startH < 12 ? 'am' : 'pm';
+      const endMer = endH < 12 ? 'am' : 'pm';
+      function fmtNoMer(mins) {
+        const totalH = Math.floor(mins / 60);
+        const m = mins % 60;
+        const h = totalH % 12 === 0 ? 12 : totalH % 12;
+        return `${h}:${String(m).padStart(2, '0')}`;
+      }
+      const startStr = startMer === endMer ? fmtNoMer(start) : fmt(start);
+      return `${startStr} \u2013 ${fmt(end)}`;
+    }
+
     // Convert ISO week key (e.g. "2026-W12") to a Date for that Monday
     function weekKeyToMonday(weekKey) {
       const [yearStr, weekStr] = weekKey.split('-W');
@@ -467,8 +497,8 @@
       return monday.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
     }
 
-    // Compute weekly summary from raw checks + overrides (used for history archival)
-    function computeWeekSummary(weekKey, checksData, overridesData) {
+    // Compute weekly summary from raw checks + overrides + swaps (used for history archival)
+    function computeWeekSummary(weekKey, checksData, overridesData, swapsData) {
       const monday = weekKeyToMonday(weekKey);
       const hours = {};
       legend.forEach(cat => hours[cat] = 0);
@@ -477,14 +507,17 @@
         const dayDate = new Date(monday);
         dayDate.setUTCDate(monday.getUTCDate() + dayIdx);
         const dateStr = dayDate.toISOString().slice(0, 10);
+        const perm = swapsData && swapsData[`${dateStr}-${dayName}`];
         schedule[dayName].blocks.forEach((block, i) => {
-          if (block.category === 'break') return;
+          const origIdx = perm ? (perm[i] ?? i) : i;
+          const contentBlock = schedule[dayName].blocks[origIdx];
+          if (contentBlock.category === 'break') return;
           totalBlocks++;
           if (checksData && checksData[`${dayName}-${i}`]) {
             blocksCompleted++;
             const ov = overridesData && overridesData[`${dateStr}-${i}`];
-            const effectiveCat = ov ? ov.category : block.category;
-            const t = parseBlockTime(block.time);
+            const effectiveCat = ov ? ov.category : contentBlock.category;
+            const t = parseBlockTime(block.time); // slot time for duration
             if (t && hours[effectiveCat] !== undefined) hours[effectiveCat] += t.duration;
           }
         });
@@ -492,9 +525,83 @@
       return { weekOf: weekKeyToLabel(weekKey), hours, blocksCompleted, totalBlocks };
     }
 
+    // ── Add Block Modal ───────────────────────────────────────────────────────
+
+    function AddBlockModal({ dayName, dateStr, onSave, onClose }) {
+      const [startStr, setStartStr] = useState('');
+      const [endStr, setEndStr] = useState('');
+      const [activity, setActivity] = useState('');
+      const [detail, setDetail] = useState('');
+      const [category, setCategory] = useState(null);
+      const [error, setError] = useState('');
+
+      function handleSave() {
+        const startMins = parseTimePart(startStr.trim());
+        const endMins   = parseTimePart(endStr.trim());
+        if (startMins === null || endMins === null) { setError('Could not parse times. Try e.g. "2:00pm"'); return; }
+        if (endMins <= startMins) { setError('End must be after start'); return; }
+        if (!activity.trim()) { setError('Activity name required'); return; }
+        if (!category) { setError('Pick a category'); return; }
+        const id = `${Date.now()}`;
+        const timeStr = minutesToTimeString(startMins, endMins);
+        onSave(dayName, dateStr, { id, time: timeStr, startMinutes: startMins, endMinutes: endMins, activity: activity.trim(), detail: detail.trim(), category });
+        onClose();
+      }
+
+      return (
+        <div className="modal-overlay" onClick={onClose}>
+          <div className="modal-box" onClick={e => e.stopPropagation()} style={{ maxWidth: '420px' }}>
+            <p style={{ color: '#71717a', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '4px', fontFamily: 'monospace' }}>Add a block</p>
+            <p style={{ color: '#f4f4f5', fontWeight: 600, fontSize: '16px', marginBottom: '1.25rem' }}>{dayName}</p>
+
+            {/* Time inputs */}
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+              <div style={{ flex: 1 }}>
+                <p style={{ color: '#71717a', fontSize: '11px', marginBottom: '4px', fontFamily: 'monospace' }}>Start</p>
+                <input className="modal-misc-input" style={{ marginTop: 0 }} placeholder="e.g. 2:00pm" value={startStr} onChange={e => { setStartStr(e.target.value); setError(''); }} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <p style={{ color: '#71717a', fontSize: '11px', marginBottom: '4px', fontFamily: 'monospace' }}>End</p>
+                <input className="modal-misc-input" style={{ marginTop: 0 }} placeholder="e.g. 2:30pm" value={endStr} onChange={e => { setEndStr(e.target.value); setError(''); }} />
+              </div>
+            </div>
+
+            {/* Activity */}
+            <input className="modal-misc-input" style={{ marginBottom: '10px' }} placeholder="Activity name" value={activity} onChange={e => { setActivity(e.target.value); setError(''); }} onKeyDown={e => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') onClose(); }} />
+
+            {/* Optional detail */}
+            <input className="modal-misc-input" style={{ marginBottom: '12px' }} placeholder="Note (optional)" value={detail} onChange={e => setDetail(e.target.value)} />
+
+            {/* Category */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', marginBottom: '12px' }}>
+              {overrideCats.filter(c => c !== 'misc').concat(['misc']).map(cat => {
+                const hex = categoryAccentHex[cat];
+                const isSelected = category === cat;
+                return (
+                  <button key={cat} className="modal-cat-btn" onClick={() => { setCategory(cat); setError(''); }}
+                    style={{ border: `1px solid ${hex}${isSelected ? 'cc' : '40'}`, background: isSelected ? `${hex}30` : `${hex}12`, color: hex, fontWeight: isSelected ? 700 : 600 }}>
+                    {categoryLabels[cat] || 'Misc'}
+                  </button>
+                );
+              })}
+            </div>
+
+            {error && <p style={{ color: '#fb7185', fontSize: '12px', fontFamily: 'monospace', marginBottom: '10px' }}>{error}</p>}
+
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button className="modal-action-btn" onClick={onClose}>Cancel</button>
+              <button onClick={handleSave} style={{ flex: 1, padding: '9px', borderRadius: '8px', background: '#34d399', color: '#09090b', fontWeight: 700, fontSize: '13px', cursor: 'pointer', border: 'none', fontFamily: 'Georgia, serif' }}>
+                Add Block
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     // ── Override Modal ────────────────────────────────────────────────────────
 
-    function OverrideModal({ block, dayName, idx, overrides, onApply, onReset, onClose }) {
+    function OverrideModal({ block, dayName, idx, overrides, hasSwap, isCustom, onApply, onReset, onResetSwap, onRemoveCustom, onClose }) {
       const [showMisc, setShowMisc] = useState(false);
       const [miscText, setMiscText] = useState('');
       const inputRef = useRef(null);
@@ -532,8 +639,17 @@
               {block.time}
             </p>
 
+            {/* Custom block: just show remove option */}
+            {isCustom && (
+              <div style={{ marginBottom: '12px' }}>
+                <button onClick={onRemoveCustom} style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(251,113,133,0.4)', background: 'rgba(251,113,133,0.12)', color: '#fb7185', fontWeight: 600, fontSize: '13px', cursor: 'pointer', fontFamily: 'Georgia, serif' }}>
+                  Remove this block
+                </button>
+              </div>
+            )}
+
             {/* Category grid */}
-            {!showMisc && (
+            {!showMisc && !isCustom && (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', marginBottom: '12px' }}>
                 {overrideCats.map(cat => {
                   const hex = categoryAccentHex[cat];
@@ -557,7 +673,7 @@
             )}
 
             {/* Misc text input */}
-            {showMisc && (
+            {!isCustom && showMisc && (
               <div style={{ marginBottom: '12px' }}>
                 <p style={{ color: '#a1a1aa', fontSize: '13px', marginBottom: '4px' }}>What did you actually do?</p>
                 <input
@@ -596,11 +712,16 @@
             )}
 
             {/* Footer actions */}
-            {!showMisc && (
-              <div style={{ display: 'flex', gap: '8px' }}>
+            {!showMisc && !isCustom && (
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 {hasOverride && (
                   <button className="modal-action-btn" onClick={() => onReset(dayName, idx)}>
                     Reset to original
+                  </button>
+                )}
+                {hasSwap && (
+                  <button className="modal-action-btn" onClick={() => { onResetSwap(); onClose(); }}>
+                    Reset day order
                   </button>
                 )}
                 <button className="modal-action-btn" onClick={onClose}>
@@ -643,8 +764,27 @@
         try { return JSON.parse(localStorage.getItem('schedule-history-v1') || '{}'); }
         catch { return {}; }
       });
+      const [swaps, setSwaps] = useState(() => {
+        try { return JSON.parse(localStorage.getItem('schedule-swaps-v1') || '{}'); } catch { return {}; }
+      });
+
+      // customBlocks["2026-03-18-Monday"] = [{id, time, startMinutes, endMinutes, activity, detail, category}]
+      const [customBlocks, setCustomBlocks] = useState(() => {
+        try { return JSON.parse(localStorage.getItem('schedule-custom-v1') || '{}'); } catch { return {}; }
+      });
+
+      // timeMutations["2026-03-18-Monday-2"] = {newStart, newEnd, causedBy} | {hidden: true, causedBy}
+      const [timeMutations, setTimeMutations] = useState(() => {
+        try { return JSON.parse(localStorage.getItem('schedule-timemut-v1') || '{}'); } catch { return {}; }
+      });
+
+      const [addingBlock, setAddingBlock] = useState(null); // { day, date }
+
       const [syncStatus, setSyncStatus] = useState(JSONBIN_BIN_ID ? 'loading' : 'unconfigured');
       const syncTimerRef = useRef(null);
+      const dragState = useRef({ sourceIdx: null, dayName: null });
+      const justDropped = useRef(false);
+      const [dragOverIdx, setDragOverIdx] = useState(null);
 
       useEffect(() => {
         const id = setInterval(() => setNowMinutes(getCurrentMinutes()), 60000);
@@ -656,47 +796,65 @@
         if (!JSONBIN_BIN_ID) return;
         fetchRemote().then(remote => {
           if (!remote) { setSyncStatus('offline'); return; }
-          let updatedChecks   = remote.checks   || {};
-          let updatedOverrides = remote.overrides || {};
-          let updatedHistory  = remote.history  || {};
+          let updatedChecks    = remote.checks       || {};
+          let updatedOverrides = remote.overrides    || {};
+          let updatedHistory   = remote.history      || {};
+          let updatedSwaps     = remote.swaps        || {};
+          let updatedCustom    = remote.custom       || {};
+          let updatedTimeMuts  = remote.timeMutations || {};
           // Week rolled over since last device synced — archive old week
           if (remote.weekKey && remote.weekKey !== weekKey) {
-            const summary = computeWeekSummary(remote.weekKey, remote.checks, remote.overrides);
+            const summary = computeWeekSummary(remote.weekKey, remote.checks, remote.overrides, remote.swaps);
             updatedHistory = { ...updatedHistory, [remote.weekKey]: summary };
             updatedChecks = {};
-            pushRemote({ weekKey, checks: updatedChecks, overrides: updatedOverrides, history: updatedHistory });
+            pushRemote({ weekKey, checks: updatedChecks, overrides: updatedOverrides, history: updatedHistory, swaps: updatedSwaps, custom: updatedCustom, timeMutations: updatedTimeMuts });
           }
           setChecks(updatedChecks);
           setOverrides(updatedOverrides);
           setHistory(updatedHistory);
+          setSwaps(updatedSwaps);
+          setCustomBlocks(updatedCustom);
+          setTimeMutations(updatedTimeMuts);
           setSyncStatus('synced');
           try {
             localStorage.setItem(`schedule-v1-${weekKey}`, JSON.stringify(updatedChecks));
             localStorage.setItem('schedule-overrides-v1', JSON.stringify(updatedOverrides));
             localStorage.setItem('schedule-history-v1', JSON.stringify(updatedHistory));
+            localStorage.setItem('schedule-swaps-v1', JSON.stringify(updatedSwaps));
+            localStorage.setItem('schedule-custom-v1', JSON.stringify(updatedCustom));
+            localStorage.setItem('schedule-timemut-v1', JSON.stringify(updatedTimeMuts));
           } catch {}
         }).catch(() => setSyncStatus('offline'));
       }, []);
 
-      function schedulePush(newChecks, newOverrides, newHistory) {
+      function schedulePush(newChecks, newOverrides, newHistory, newSwaps, newCustom, newTimeMuts) {
         if (!JSONBIN_BIN_ID) return;
         if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
         setSyncStatus('syncing');
         syncTimerRef.current = setTimeout(async () => {
           try {
-            await pushRemote({ weekKey, checks: newChecks, overrides: newOverrides, history: newHistory });
+            await pushRemote({
+              weekKey,
+              checks: newChecks,
+              overrides: newOverrides,
+              history: newHistory,
+              swaps: newSwaps !== undefined ? newSwaps : swaps,
+              custom: newCustom !== undefined ? newCustom : customBlocks,
+              timeMutations: newTimeMuts !== undefined ? newTimeMuts : timeMutations,
+            });
             setSyncStatus('synced');
           } catch { setSyncStatus('error'); }
         }, 2000);
       }
 
-      function toggleCheck(day, idx) {
-        const key = `${day}-${idx}`;
+      function toggleCheck(day, idxOrKey) {
+        // idxOrKey is either a number (hardcoded slot) or "cb_{id}" string (custom block)
+        const key = `${day}-${idxOrKey}`;
         const next = { ...checks };
         if (next[key]) { delete next[key]; } else { next[key] = true; }
         setChecks(next);
         try { localStorage.setItem(`schedule-v1-${weekKey}`, JSON.stringify(next)); } catch {}
-        schedulePush(next, overrides, history);
+        schedulePush(next, overrides, history, swaps);
       }
 
       function applyOverride(dayName, idx, category, customText) {
@@ -705,7 +863,7 @@
         setOverrides(next);
         try { localStorage.setItem('schedule-overrides-v1', JSON.stringify(next)); } catch {}
         setEditingBlock(null);
-        schedulePush(checks, next, history);
+        schedulePush(checks, next, history, swaps);
       }
 
       function resetOverride(dayName, idx) {
@@ -715,7 +873,7 @@
         setOverrides(next);
         try { localStorage.setItem('schedule-overrides-v1', JSON.stringify(next)); } catch {}
         setEditingBlock(null);
-        schedulePush(checks, next, history);
+        schedulePush(checks, next, history, swaps);
       }
 
       // Returns the block as it should be displayed (with override applied)
@@ -735,17 +893,111 @@
         };
       }
 
+      // Returns the content block for a given slot (applying DnD swap permutation)
+      function getPermutedContent(dayName, slotIdx) {
+        const dateKey = `${getDateForDay(dayName)}-${dayName}`;
+        const perm = swaps[dateKey];
+        const origIdx = perm ? (perm[slotIdx] ?? slotIdx) : slotIdx;
+        return schedule[dayName].blocks[origIdx];
+      }
+
+      function applySwap(dayName, slotA, slotB) {
+        const dateKey = `${getDateForDay(dayName)}-${dayName}`;
+        const len = schedule[dayName].blocks.length;
+        const current = swaps[dateKey] || Array.from({ length: len }, (_, k) => k);
+        const next = [...current];
+        [next[slotA], next[slotB]] = [next[slotB], next[slotA]];
+        const nextSwaps = { ...swaps, [dateKey]: next };
+        setSwaps(nextSwaps);
+        try { localStorage.setItem('schedule-swaps-v1', JSON.stringify(nextSwaps)); } catch {}
+        schedulePush(checks, overrides, history, nextSwaps);
+      }
+
+      function resetSwap(dayName) {
+        const dateKey = `${getDateForDay(dayName)}-${dayName}`;
+        const nextSwaps = { ...swaps };
+        delete nextSwaps[dateKey];
+        setSwaps(nextSwaps);
+        try { localStorage.setItem('schedule-swaps-v1', JSON.stringify(nextSwaps)); } catch {}
+        schedulePush(checks, overrides, history, nextSwaps);
+      }
+
+      function computeOverlapTrimming(dayName, dateStr, newStart, newEnd, cbId) {
+        const mutations = {};
+        schedule[dayName].blocks.forEach((block, i) => {
+          const t = parseBlockTime(block.time);
+          if (!t) return;
+          const { start, end } = t;
+          if (end <= newStart || start >= newEnd) return; // no overlap
+          const mutKey = `${dateStr}-${dayName}-${i}`;
+          if (start >= newStart && end <= newEnd) {
+            mutations[mutKey] = { hidden: true, causedBy: cbId };
+          } else if (start < newStart) {
+            // Existing block's tail overlaps — trim end
+            mutations[mutKey] = { newStart: start, newEnd: newStart, causedBy: cbId };
+          } else {
+            // Existing block's head overlaps — trim start
+            mutations[mutKey] = { newStart: newEnd, newEnd: end, causedBy: cbId };
+          }
+        });
+        return mutations;
+      }
+
+      function saveNewBlock(dayName, dateStr, newBlockData) {
+        const cbKey = `${dateStr}-${dayName}`;
+        const mutations = computeOverlapTrimming(dayName, dateStr, newBlockData.startMinutes, newBlockData.endMinutes, newBlockData.id);
+        const nextMuts = { ...timeMutations, ...mutations };
+        const nextCustom = { ...customBlocks, [cbKey]: [...(customBlocks[cbKey] || []), newBlockData] };
+        setTimeMutations(nextMuts);
+        setCustomBlocks(nextCustom);
+        try {
+          localStorage.setItem('schedule-custom-v1', JSON.stringify(nextCustom));
+          localStorage.setItem('schedule-timemut-v1', JSON.stringify(nextMuts));
+        } catch {}
+        schedulePush(checks, overrides, history, swaps, nextCustom, nextMuts);
+      }
+
+      function removeCustomBlock(dayName, dateStr, blockId) {
+        const cbKey = `${dateStr}-${dayName}`;
+        const nextCustom = { ...customBlocks, [cbKey]: (customBlocks[cbKey] || []).filter(b => b.id !== blockId) };
+        // Restore any time mutations caused by this block
+        const nextMuts = { ...timeMutations };
+        Object.keys(nextMuts).forEach(k => { if (nextMuts[k].causedBy === blockId) delete nextMuts[k]; });
+        setCustomBlocks(nextCustom);
+        setTimeMutations(nextMuts);
+        try {
+          localStorage.setItem('schedule-custom-v1', JSON.stringify(nextCustom));
+          localStorage.setItem('schedule-timemut-v1', JSON.stringify(nextMuts));
+        } catch {}
+        schedulePush(checks, overrides, history, swaps, nextCustom, nextMuts);
+      }
+
       function getActualHours() {
         const actual = {};
         legend.forEach(cat => actual[cat] = 0);
         days.forEach(day => {
+          const dateStr = getDateForDay(day);
+          // Hardcoded blocks (with swap + override applied)
           schedule[day].blocks.forEach((block, i) => {
-            if (checks[`${day}-${i}`] && block.category !== 'break') {
-              const effective = getEffectiveBlock(day, block, i);
-              const t = parseBlockTime(block.time);
-              if (t && actual[effective.category] !== undefined) {
-                actual[effective.category] += t.duration;
-              }
+            if (checks[`${day}-${i}`]) {
+              const mut = timeMutations[`${dateStr}-${day}-${i}`];
+              if (mut?.hidden) return;
+              const contentBlock = getPermutedContent(day, i);
+              if (contentBlock.category === 'break') return;
+              const effective = getEffectiveBlock(day, contentBlock, i);
+              const effectiveTime = mut ? minutesToTimeString(mut.newStart, mut.newEnd) : block.time;
+              const t = parseBlockTime(effectiveTime);
+              if (t && actual[effective.category] !== undefined) actual[effective.category] += t.duration;
+            }
+          });
+          // Custom blocks
+          const cbKey = `${dateStr}-${day}`;
+          (customBlocks[cbKey] || []).forEach(cb => {
+            if (checks[`${day}-cb_${cb.id}`]) {
+              const ov = overrides[`${dateStr}-cb_${cb.id}`];
+              const effectiveCat = ov ? ov.category : cb.category;
+              const t = parseBlockTime(cb.time);
+              if (t && actual[effectiveCat] !== undefined) actual[effectiveCat] += t.duration;
             }
           });
         });
@@ -876,85 +1128,115 @@
               <p className="text-zinc-500 text-sm mt-0\.5 italic">{day.theme}</p>
             </div>
 
-            <div className="space-y-3">
-              {day.blocks.map((block, i) => {
-                const effective = getEffectiveBlock(activeDay, block, i);
-                const c = categoryColors[effective.category];
-                const hex = categoryAccentHex[effective.category];
-                const isChecked = !!checks[`${activeDay}-${i}`];
-                const blockTime = parseBlockTime(block.time);
-                const isNow = activeDay === todayName
-                  && blockTime
-                  && nowMinutes >= blockTime.start
-                  && nowMinutes < blockTime.end;
-                const isBreak = block.category === 'break' && !effective.isOverridden;
+            {(() => {
+              const dateStr = getDateForDay(activeDay);
+              const cbKey = `${dateStr}-${activeDay}`;
+              // Build merged block list: hardcoded (with time mutations) + custom
+              const hardcoded = day.blocks.map((block, i) => {
+                const mut = timeMutations[`${dateStr}-${activeDay}-${i}`];
+                if (mut?.hidden) return null;
+                const effectiveTime = mut ? minutesToTimeString(mut.newStart, mut.newEnd) : block.time;
+                return { ...block, time: effectiveTime, _type: 'hardcoded', _slotIdx: i };
+              }).filter(Boolean);
+              const custom = (customBlocks[cbKey] || []).map(cb => ({ ...cb, _type: 'custom' }));
+              const allBlocks = [...hardcoded, ...custom].sort((a, b) => {
+                const ta = parseBlockTime(a.time); const tb = parseBlockTime(b.time);
+                return (ta?.start ?? 0) - (tb?.start ?? 0);
+              });
 
-                return (
-                  <div
-                    key={i}
-                    className={`block-card rounded-lg border ${c.border} ${c.bg} px-5 py-4 flex items-start gap-4`}
-                    onClick={() => !isBreak && setEditingBlock({ day: activeDay, idx: i })}
-                    style={{
-                      opacity: isChecked ? 0.42 : 1,
-                      boxShadow: isNow ? `0 0 0 1px ${hex}70, inset 0 0 40px ${hex}0a` : 'none',
-                      cursor: isBreak ? 'default' : 'pointer',
-                    }}
-                  >
-                    {/* Category dot */}
-                    <div className="mt-1\.5 flex-shrink-0">
-                      <div className={`w-2 h-2 rounded-full ${c.accent}`} />
-                    </div>
+              return (
+                <div className="space-y-3">
+                  {allBlocks.map((block, renderIdx) => {
+                    const isCustom = block._type === 'custom';
+                    const checkKey = isCustom ? `${activeDay}-cb_${block.id}` : `${activeDay}-${block._slotIdx}`;
+                    const overrideKey = isCustom ? `${dateStr}-cb_${block.id}` : null;
 
-                    {/* Content */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-baseline justify-between gap-2 flex-wrap">
-                        <span
-                          className={`text-base font-semibold ${c.text}`}
-                          style={{
-                            textDecoration: isChecked ? 'line-through' : 'none',
-                            textDecorationColor: 'rgba(255,255,255,0.25)',
-                          }}
-                        >
-                          {effective.activity}
-                          {isNow && (
-                            <span className="now-badge" style={{ background: hex }}>NOW</span>
-                          )}
-                          {effective.isOverridden && (
-                            <span style={{
-                              fontSize: '10px', color: '#52525b', marginLeft: '8px',
-                              fontFamily: 'monospace', fontWeight: 400,
-                            }}>
-                              ↺ was {effective.originalActivity}
-                            </span>
-                          )}
-                        </span>
-                        <span className="text-zinc-500 text-xs font-mono">{block.time}</span>
-                      </div>
-                      <p className="text-zinc-300 text-sm mt-0\.5">{effective.detail}</p>
-                    </div>
+                    // Content block (apply swap for hardcoded, identity for custom)
+                    const contentBlock = isCustom ? block : getPermutedContent(activeDay, block._slotIdx);
+                    // Apply override on top
+                    const ov = overrideKey ? overrides[overrideKey] : (isCustom ? null : overrides[`${dateStr}-${block._slotIdx}`]);
+                    const effective = ov
+                      ? { ...contentBlock, category: ov.category, activity: ov.category === 'misc' ? (ov.custom || 'Misc') : categoryLabels[ov.category], detail: ov.custom || contentBlock.detail, isOverridden: true, originalActivity: contentBlock.activity }
+                      : { ...contentBlock, isOverridden: false };
 
-                    {/* Check button */}
-                    {!isBreak && (
-                      <button
-                        onClick={e => { e.stopPropagation(); toggleCheck(activeDay, i); }}
-                        title={isChecked ? "Mark incomplete" : "Mark done"}
+                    const c = categoryColors[effective.category] || categoryColors.misc;
+                    const hex = categoryAccentHex[effective.category] || categoryAccentHex.misc;
+                    const isChecked = !!checks[checkKey];
+                    const blockTime = parseBlockTime(block.time);
+                    const isNow = activeDay === todayName && blockTime && nowMinutes >= blockTime.start && nowMinutes < blockTime.end;
+                    const isBreak = contentBlock.category === 'break' && !effective.isOverridden;
+                    const isDragOver = !isCustom && dragOverIdx === block._slotIdx;
+
+                    return (
+                      <div
+                        key={isCustom ? `cb_${block.id}` : block._slotIdx}
+                        draggable={!isCustom && !isBreak}
+                        className={`block-card rounded-lg border ${c.border} ${c.bg} px-5 py-4 flex items-start gap-4${isDragOver ? ' drag-over' : ''}`}
+                        onDragStart={!isCustom ? () => { dragState.current = { sourceIdx: block._slotIdx, dayName: activeDay }; } : undefined}
+                        onDragOver={!isCustom ? (e => { e.preventDefault(); if (!isBreak && dragState.current.sourceIdx !== block._slotIdx) setDragOverIdx(block._slotIdx); }) : undefined}
+                        onDragLeave={!isCustom ? () => setDragOverIdx(null) : undefined}
+                        onDrop={!isCustom ? (e => {
+                          e.preventDefault();
+                          setDragOverIdx(null);
+                          const { sourceIdx, dayName } = dragState.current;
+                          if (sourceIdx !== null && sourceIdx !== block._slotIdx && dayName === activeDay) {
+                            applySwap(activeDay, sourceIdx, block._slotIdx);
+                          }
+                          dragState.current = { sourceIdx: null, dayName: null };
+                          justDropped.current = true;
+                          setTimeout(() => { justDropped.current = false; }, 100);
+                        }) : undefined}
+                        onDragEnd={!isCustom ? () => { setDragOverIdx(null); dragState.current = { sourceIdx: null, dayName: null }; } : undefined}
+                        onClick={() => {
+                          if (justDropped.current) return;
+                          if (!isBreak) setEditingBlock({ day: activeDay, idx: isCustom ? `cb_${block.id}` : block._slotIdx, isCustom, customBlock: isCustom ? block : null });
+                        }}
                         style={{
-                          width: '24px', height: '24px', borderRadius: '50%',
-                          flexShrink: 0, marginTop: '1px',
-                          border: isChecked ? 'none' : '1.5px solid rgba(100,100,110,0.45)',
-                          background: isChecked ? hex : 'transparent',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          transition: 'all 0.15s ease',
-                          fontSize: '12px', color: '#09090b', fontWeight: 700, lineHeight: 1,
+                          opacity: isChecked ? 0.42 : 1,
+                          boxShadow: isNow ? `0 0 0 1px ${hex}70, inset 0 0 40px ${hex}0a` : 'none',
+                          cursor: isBreak ? 'default' : undefined,
                         }}
                       >
-                        {isChecked && '✓'}
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+                        <div className="mt-1\.5 flex-shrink-0">
+                          <div className={`w-2 h-2 rounded-full ${c.accent}`} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-baseline justify-between gap-2 flex-wrap">
+                            <span className={`text-base font-semibold ${c.text}`} style={{ textDecoration: isChecked ? 'line-through' : 'none', textDecorationColor: 'rgba(255,255,255,0.25)' }}>
+                              {effective.activity}
+                              {isNow && <span className="now-badge" style={{ background: hex }}>NOW</span>}
+                              {isCustom && <span style={{ fontSize: '10px', color: '#52525b', marginLeft: '8px', fontFamily: 'monospace', fontWeight: 400 }}>+ added</span>}
+                              {effective.isOverridden && <span style={{ fontSize: '10px', color: '#52525b', marginLeft: '8px', fontFamily: 'monospace', fontWeight: 400 }}>↺ was {effective.originalActivity}</span>}
+                            </span>
+                            <span className="text-zinc-500 text-xs font-mono">{block.time}</span>
+                          </div>
+                          <p className="text-zinc-300 text-sm mt-0\.5">{effective.detail}</p>
+                        </div>
+                        {!isBreak && (
+                          <button
+                            onClick={e => { e.stopPropagation(); toggleCheck(activeDay, isCustom ? `cb_${block.id}` : block._slotIdx); }}
+                            title={isChecked ? "Mark incomplete" : "Mark done"}
+                            style={{ width: '24px', height: '24px', borderRadius: '50%', flexShrink: 0, marginTop: '1px', border: isChecked ? 'none' : '1.5px solid rgba(100,100,110,0.45)', background: isChecked ? hex : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s ease', fontSize: '12px', color: '#09090b', fontWeight: 700, lineHeight: 1 }}
+                          >
+                            {isChecked && '✓'}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+
+            {/* Add block button */}
+            <button
+              onClick={() => setAddingBlock({ day: activeDay, date: getDateForDay(activeDay) })}
+              style={{ width: '100%', marginTop: '8px', padding: '10px', borderRadius: '8px', border: '1px dashed rgba(255,255,255,0.12)', background: 'transparent', color: '#52525b', fontSize: '13px', cursor: 'pointer', fontFamily: 'Georgia, serif', transition: 'all 0.15s ease' }}
+              onMouseEnter={e => { e.target.style.borderColor = 'rgba(255,255,255,0.25)'; e.target.style.color = '#a1a1aa'; }}
+              onMouseLeave={e => { e.target.style.borderColor = 'rgba(255,255,255,0.12)'; e.target.style.color = '#52525b'; }}
+            >
+              + Add block
+            </button>
 
             {activeDay === "Saturday" && (
               <div className="mt-6 rounded-lg border border-amber-400-20 bg-amber-950-30 px-5 py-4">
@@ -1003,13 +1285,29 @@
           {/* Override Modal */}
           {editingBlock && (
             <OverrideModal
-              block={schedule[editingBlock.day].blocks[editingBlock.idx]}
+              block={editingBlock.isCustom ? editingBlock.customBlock : getPermutedContent(editingBlock.day, editingBlock.idx)}
               dayName={editingBlock.day}
               idx={editingBlock.idx}
               overrides={overrides}
+              hasSwap={!editingBlock.isCustom && !!swaps[`${getDateForDay(editingBlock.day)}-${editingBlock.day}`]}
+              isCustom={editingBlock.isCustom}
               onApply={applyOverride}
               onReset={resetOverride}
+              onResetSwap={() => resetSwap(editingBlock.day)}
+              onRemoveCustom={() => {
+                const cb = editingBlock.customBlock;
+                removeCustomBlock(editingBlock.day, getDateForDay(editingBlock.day), cb.id);
+                setEditingBlock(null);
+              }}
               onClose={() => setEditingBlock(null)}
+            />
+          )}
+          {addingBlock && (
+            <AddBlockModal
+              dayName={addingBlock.day}
+              dateStr={addingBlock.date}
+              onSave={saveNewBlock}
+              onClose={() => setAddingBlock(null)}
             />
           )}
 

@@ -237,15 +237,9 @@
   <script type="text/babel">
     const { useState, useEffect, useRef } = React;
 
-    // ── JSONBin sync ─────────────────────────────────────────────────────────
-    // To enable cross-device sync:
-    //   1. Sign up free at https://jsonbin.io
-    //   2. Create a new bin with initial JSON:
-    //      {"weekKey":"","checks":{},"overrides":{},"history":{}}
-    //   3. Copy your Bin ID and X-Master-Key from the dashboard
-    //   4. Paste them into the two constants below
-    const JSONBIN_BIN_ID  = '69bb359fc3097a1dd539ee12';   // ← paste your Bin ID here
-    const JSONBIN_API_KEY = '$2a$10$h7qkXZKMf9goD09gk8mrwOv4Qb2Kr/FbGcyE0H3u5t3tfyxIzOu2e';   // ← paste your X-Master-Key here
+    // ── JSONBin sync ──────────────────────────────────────────────────────────
+    const JSONBIN_BIN_ID  = '69bb359fc3097a1dd539ee12';
+    const JSONBIN_API_KEY = '$2a$10$h7qkXZKMf9goD09gk8mrwOv4Qb2Kr/FbGcyE0H3u5t3tfyxIzOu2e';
     const JSONBIN_URL = JSONBIN_BIN_ID
       ? `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`
       : '';
@@ -424,7 +418,6 @@
       return n.getHours() * 60 + n.getMinutes();
     }
 
-    // Map a day name to its ISO date string within the current week
     function getDateForDay(dayName) {
       const today = new Date();
       const todayDow = today.getDay();
@@ -447,8 +440,7 @@
       } else if (mer === 'pm') {
         if (h !== 12) h += 12;
       } else {
-        // Schedule runs 11am–11pm. No-meridiem rules:
-        // 11 → 11am, 12 → 12pm (noon), 1–10 → pm
+        // Schedule runs 11am–11pm. 11 → 11am, 12 → noon, 1–10 → pm
         if (h !== 11 && h !== 12) h += 12;
       }
       return h * 60 + min;
@@ -463,7 +455,6 @@
       return { start, end, duration: (end - start) / 60 };
     }
 
-    // Format a single minute value as "2:30pm"
     function fmtTime(mins) {
       const totalH = Math.floor(mins / 60);
       const m = mins % 60;
@@ -471,7 +462,6 @@
       return `${h}:${String(m).padStart(2, '0')}${totalH < 12 ? 'am' : 'pm'}`;
     }
 
-    // Convert minutes since midnight back to a time string like "2:30 – 4:30pm"
     function minutesToTimeString(start, end) {
       function fmt(mins) {
         const totalH = Math.floor(mins / 60);
@@ -480,7 +470,6 @@
         const mer = totalH < 12 ? 'am' : 'pm';
         return `${h}:${String(m).padStart(2, '0')}${mer}`;
       }
-      // Only show meridiem on end, omit on start if same period and start != 12
       const startH = Math.floor(start / 60);
       const endH = Math.floor(end / 60);
       const startMer = startH < 12 ? 'am' : 'pm';
@@ -495,7 +484,6 @@
       return `${startStr} \u2013 ${fmt(end)}`;
     }
 
-    // Convert ISO week key (e.g. "2026-W12") to a Date for that Monday
     function weekKeyToMonday(weekKey) {
       const [yearStr, weekStr] = weekKey.split('-W');
       const year = parseInt(yearStr), week = parseInt(weekStr);
@@ -511,8 +499,24 @@
       return monday.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
     }
 
-    // Compute weekly summary from raw checks + overrides + swaps (used for history archival)
-    function computeWeekSummary(weekKey, checksData, overridesData, swapsData) {
+    // Migrate old check keys "Monday-0" → "Monday-b_0"; leave "Monday-cb_..." unchanged
+    function migrateChecks(checksData) {
+      if (!checksData) return {};
+      const result = {};
+      Object.entries(checksData).forEach(([k, v]) => {
+        const lastDash = k.lastIndexOf('-');
+        const suffix = k.slice(lastDash + 1);
+        if (/^\d+$/.test(suffix)) {
+          result[`${k.slice(0, lastDash)}-b_${suffix}`] = v;
+        } else {
+          result[k] = v;
+        }
+      });
+      return result;
+    }
+
+    // Compute weekly summary from checks + dayBlocks (used for history archival)
+    function computeWeekSummary(weekKey, checksData, dayBlocksData) {
       const monday = weekKeyToMonday(weekKey);
       const hours = {};
       legend.forEach(cat => hours[cat] = 0);
@@ -521,18 +525,16 @@
         const dayDate = new Date(monday);
         dayDate.setUTCDate(monday.getUTCDate() + dayIdx);
         const dateStr = dayDate.toISOString().slice(0, 10);
-        const perm = swapsData && swapsData[`${dateStr}-${dayName}`];
-        schedule[dayName].blocks.forEach((block, i) => {
-          const origIdx = perm ? (perm[i] ?? i) : i;
-          const contentBlock = schedule[dayName].blocks[origIdx];
-          if (contentBlock.category === 'break') return;
+        const key = `${dateStr}-${dayName}`;
+        const blocks = (dayBlocksData && dayBlocksData[key])
+          || schedule[dayName].blocks.map((b, i) => ({ id: `b_${i}`, time: b.time, category: b.category }));
+        blocks.forEach(block => {
+          if (block.category === 'break') return;
           totalBlocks++;
-          if (checksData && checksData[`${dayName}-${i}`]) {
+          if (checksData && checksData[`${dayName}-${block.id}`]) {
             blocksCompleted++;
-            const ov = overridesData && overridesData[`${dateStr}-${i}`];
-            const effectiveCat = ov ? ov.category : contentBlock.category;
-            const t = parseBlockTime(block.time); // slot time for duration
-            if (t && hours[effectiveCat] !== undefined) hours[effectiveCat] += t.duration;
+            const t = parseBlockTime(block.time);
+            if (t && hours[block.category] !== undefined) hours[block.category] += t.duration;
           }
         });
       });
@@ -541,7 +543,7 @@
 
     // ── Edit Time Modal ───────────────────────────────────────────────────────
 
-    function EditTimeModal({ block, dayName, dateStr, renderIdx, onSave, onClose }) {
+    function EditTimeModal({ block, dayName, onSave, onClose }) {
       const bt = parseBlockTime(block.time);
       const [startStr, setStartStr] = useState(bt ? fmtTime(bt.start) : '');
       const [endStr,   setEndStr]   = useState(bt ? fmtTime(bt.end)   : '');
@@ -552,7 +554,7 @@
         const newEnd   = parseTimePart(endStr.trim());
         if (newStart === null || newEnd === null) { setError('Could not parse — try e.g. "2:00pm"'); return; }
         if (newEnd <= newStart) { setError('End must be after start'); return; }
-        onSave(dayName, dateStr, block, renderIdx, newStart, newEnd);
+        onSave(dayName, block.id, newStart, newEnd);
         onClose();
       }
 
@@ -593,7 +595,7 @@
 
     // ── Add Block Modal ───────────────────────────────────────────────────────
 
-    function AddBlockModal({ dayName, dateStr, onSave, onClose }) {
+    function AddBlockModal({ dayName, onSave, onClose }) {
       const [startStr, setStartStr] = useState('');
       const [endStr, setEndStr] = useState('');
       const [activity, setActivity] = useState('');
@@ -608,9 +610,8 @@
         if (endMins <= startMins) { setError('End must be after start'); return; }
         if (!activity.trim()) { setError('Activity name required'); return; }
         if (!category) { setError('Pick a category'); return; }
-        const id = `${Date.now()}`;
         const timeStr = minutesToTimeString(startMins, endMins);
-        onSave(dayName, dateStr, { id, time: timeStr, startMinutes: startMins, endMinutes: endMins, activity: activity.trim(), detail: detail.trim(), category });
+        onSave(dayName, { time: timeStr, startMinutes: startMins, endMinutes: endMins, activity: activity.trim(), detail: detail.trim(), category });
         onClose();
       }
 
@@ -620,7 +621,6 @@
             <p style={{ color: '#71717a', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '4px', fontFamily: 'monospace' }}>Add a block</p>
             <p style={{ color: '#f4f4f5', fontWeight: 600, fontSize: '16px', marginBottom: '1.25rem' }}>{dayName}</p>
 
-            {/* Time inputs */}
             <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
               <div style={{ flex: 1 }}>
                 <p style={{ color: '#71717a', fontSize: '11px', marginBottom: '4px', fontFamily: 'monospace' }}>Start</p>
@@ -632,13 +632,10 @@
               </div>
             </div>
 
-            {/* Activity */}
             <input className="modal-misc-input" style={{ marginBottom: '10px' }} placeholder="Activity name" value={activity} onChange={e => { setActivity(e.target.value); setError(''); }} onKeyDown={e => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') onClose(); }} />
 
-            {/* Optional detail */}
             <input className="modal-misc-input" style={{ marginBottom: '12px' }} placeholder="Note (optional)" value={detail} onChange={e => setDetail(e.target.value)} />
 
-            {/* Category */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', marginBottom: '12px' }}>
               {overrideCats.filter(c => c !== 'misc').concat(['misc']).map(cat => {
                 const hex = categoryAccentHex[cat];
@@ -667,12 +664,15 @@
 
     // ── Override Modal ────────────────────────────────────────────────────────
 
-    function OverrideModal({ block, dayName, idx, overrides, hasSwap, onApply, onReset, onResetSwap, onDelete, onEditTime, onClose }) {
+    function OverrideModal({ block, dayName, onApply, onReset, onDelete, onEditTime, onClose }) {
       const [showMisc, setShowMisc] = useState(false);
       const [miscText, setMiscText] = useState('');
       const inputRef = useRef(null);
-      const overrideKey = `${getDateForDay(dayName)}-${idx}`;
-      const hasOverride = !!overrides[overrideKey];
+
+      const isCustomBlock = block.id && block.id.startsWith('cb_');
+      const hasOverride = !isCustomBlock && block.defaultCategory !== undefined && (
+        block.category !== block.defaultCategory || block.activity !== block.defaultActivity
+      );
 
       useEffect(() => {
         if (showMisc && inputRef.current) inputRef.current.focus();
@@ -680,18 +680,17 @@
 
       function handleCatClick(cat) {
         if (cat === 'misc') { setShowMisc(true); }
-        else { onApply(dayName, idx, cat, ''); }
+        else { onApply(dayName, block.id, cat, ''); }
       }
 
       function handleMiscSave() {
-        if (miscText.trim()) onApply(dayName, idx, 'misc', miscText.trim());
+        if (miscText.trim()) onApply(dayName, block.id, 'misc', miscText.trim());
       }
 
       return (
         <div className="modal-overlay" onClick={onClose}>
           <div className="modal-box" onClick={e => e.stopPropagation()}>
 
-            {/* Header */}
             <p style={{ color: '#71717a', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '4px', fontFamily: 'monospace' }}>
               This block
             </p>
@@ -702,7 +701,6 @@
               {block.time}
             </p>
 
-            {/* Category grid */}
             {!showMisc && (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', marginBottom: '12px' }}>
                 {overrideCats.map(cat => {
@@ -718,7 +716,6 @@
               </div>
             )}
 
-            {/* Misc text input */}
             {showMisc && (
               <div style={{ marginBottom: '12px' }}>
                 <p style={{ color: '#a1a1aa', fontSize: '13px', marginBottom: '4px' }}>What did you actually do?</p>
@@ -736,16 +733,12 @@
               </div>
             )}
 
-            {/* Footer actions */}
             {!showMisc && (
               <>
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
                   <button className="modal-action-btn" onClick={onEditTime}>Edit time</button>
                   {hasOverride && (
-                    <button className="modal-action-btn" onClick={() => onReset(dayName, idx)}>Reset to original</button>
-                  )}
-                  {hasSwap && (
-                    <button className="modal-action-btn" onClick={() => { onResetSwap(); onClose(); }}>Reset day order</button>
+                    <button className="modal-action-btn" onClick={() => onReset(dayName, block.id)}>Reset to original</button>
                   )}
                   <button className="modal-action-btn" onClick={onClose}>Cancel</button>
                 </div>
@@ -769,47 +762,33 @@
       const [activeDay, setActiveDay] = useState(todayName);
       const [nowMinutes, setNowMinutes] = useState(getCurrentMinutes());
 
+      // checks: { "Monday-b_0": true, "Monday-cb_1710000000000": true }
       const [checks, setChecks] = useState(() => {
         try {
-          const s = localStorage.getItem(`schedule-v1-${weekKey}`);
-          return s ? JSON.parse(s) : {};
+          const stored = localStorage.getItem(`schedule-checks-v1-${weekKey}`);
+          if (stored) return JSON.parse(stored);
+          // Migrate from old key format
+          const old = localStorage.getItem(`schedule-v1-${weekKey}`);
+          return old ? migrateChecks(JSON.parse(old)) : {};
         } catch { return {}; }
       });
 
-      // Overrides keyed by "{date}-{blockIdx}", e.g. "2026-03-18-0"
-      const [overrides, setOverrides] = useState(() => {
-        try {
-          const s = localStorage.getItem('schedule-overrides-v1');
-          return s ? JSON.parse(s) : {};
-        } catch { return {}; }
+      // dayBlocks: { "2026-03-19-Thursday": [{id, time, activity, detail, category, defaultActivity?, ...}] }
+      const [dayBlocks, setDayBlocks] = useState(() => {
+        try { return JSON.parse(localStorage.getItem('schedule-dayblocks-v1') || '{}'); } catch { return {}; }
       });
-
-      const [editingBlock, setEditingBlock] = useState(null); // { day, idx }
 
       const [history, setHistory] = useState(() => {
-        try { return JSON.parse(localStorage.getItem('schedule-history-v1') || '{}'); }
-        catch { return {}; }
-      });
-      const [swaps, setSwaps] = useState(() => {
-        try { return JSON.parse(localStorage.getItem('schedule-swaps-v1') || '{}'); } catch { return {}; }
+        try { return JSON.parse(localStorage.getItem('schedule-history-v1') || '{}'); } catch { return {}; }
       });
 
-      // customBlocks["2026-03-18-Monday"] = [{id, time, startMinutes, endMinutes, activity, detail, category}]
-      const [customBlocks, setCustomBlocks] = useState(() => {
-        try { return JSON.parse(localStorage.getItem('schedule-custom-v1') || '{}'); } catch { return {}; }
-      });
-
-      // timeMutations["2026-03-18-Monday-2"] = {newStart, newEnd, causedBy} | {hidden: true, causedBy}
-      const [timeMutations, setTimeMutations] = useState(() => {
-        try { return JSON.parse(localStorage.getItem('schedule-timemut-v1') || '{}'); } catch { return {}; }
-      });
-
-      const [addingBlock, setAddingBlock] = useState(null); // { day, date }
-      const [editingTime, setEditingTime] = useState(null); // { day, date, block, renderIdx }
+      const [editingBlock, setEditingBlock] = useState(null); // { day, block, renderIdx }
+      const [editingTime, setEditingTime] = useState(null);   // { day, block }
+      const [addingBlock, setAddingBlock] = useState(null);   // { day }
 
       const [syncStatus, setSyncStatus] = useState(JSONBIN_BIN_ID ? 'loading' : 'unconfigured');
       const syncTimerRef = useRef(null);
-      const dragState = useRef({ sourceBlock: null, dayName: null });
+      const dragState = useRef({ blockId: null, dayName: null });
       const justDropped = useRef(false);
       const [dragOverIdx, setDragOverIdx] = useState(null);
 
@@ -818,364 +797,216 @@
         return () => clearInterval(id);
       }, []);
 
-      // Fetch remote on mount — detect week rollover, merge state
+      // Fetch remote on mount
       useEffect(() => {
         if (!JSONBIN_BIN_ID) return;
         fetchRemote().then(remote => {
           if (!remote) { setSyncStatus('offline'); return; }
-          let updatedChecks    = remote.checks       || {};
-          let updatedOverrides = remote.overrides    || {};
-          let updatedHistory   = remote.history      || {};
-          let updatedSwaps     = remote.swaps        || {};
-          let updatedCustom    = remote.custom       || {};
-          let updatedTimeMuts  = remote.timeMutations || {};
-          // Week rolled over since last device synced — archive old week
+          let updatedChecks    = migrateChecks(remote.checks    || {});
+          let updatedDayBlocks = remote.dayBlocks || {};
+          let updatedHistory   = remote.history   || {};
+          // Week rolled over since last sync — archive old week
           if (remote.weekKey && remote.weekKey !== weekKey) {
-            const summary = computeWeekSummary(remote.weekKey, remote.checks, remote.overrides, remote.swaps);
+            const summary = computeWeekSummary(remote.weekKey, updatedChecks, updatedDayBlocks);
             updatedHistory = { ...updatedHistory, [remote.weekKey]: summary };
             updatedChecks = {};
-            pushRemote({ weekKey, checks: updatedChecks, overrides: updatedOverrides, history: updatedHistory, swaps: updatedSwaps, custom: updatedCustom, timeMutations: updatedTimeMuts });
+            pushRemote({ weekKey, checks: updatedChecks, dayBlocks: updatedDayBlocks, history: updatedHistory });
           }
           setChecks(updatedChecks);
-          setOverrides(updatedOverrides);
+          setDayBlocks(updatedDayBlocks);
           setHistory(updatedHistory);
-          setSwaps(updatedSwaps);
-          setCustomBlocks(updatedCustom);
-          setTimeMutations(updatedTimeMuts);
           setSyncStatus('synced');
           try {
-            localStorage.setItem(`schedule-v1-${weekKey}`, JSON.stringify(updatedChecks));
-            localStorage.setItem('schedule-overrides-v1', JSON.stringify(updatedOverrides));
+            localStorage.setItem(`schedule-checks-v1-${weekKey}`, JSON.stringify(updatedChecks));
+            localStorage.setItem('schedule-dayblocks-v1', JSON.stringify(updatedDayBlocks));
             localStorage.setItem('schedule-history-v1', JSON.stringify(updatedHistory));
-            localStorage.setItem('schedule-swaps-v1', JSON.stringify(updatedSwaps));
-            localStorage.setItem('schedule-custom-v1', JSON.stringify(updatedCustom));
-            localStorage.setItem('schedule-timemut-v1', JSON.stringify(updatedTimeMuts));
           } catch {}
         }).catch(() => setSyncStatus('offline'));
       }, []);
 
-      function schedulePush(newChecks, newOverrides, newHistory, newSwaps, newCustom, newTimeMuts) {
+      function schedulePush(newChecks, newDayBlocks, newHistory) {
         if (!JSONBIN_BIN_ID) return;
         if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
         setSyncStatus('syncing');
         syncTimerRef.current = setTimeout(async () => {
           try {
-            await pushRemote({
-              weekKey,
-              checks: newChecks,
-              overrides: newOverrides,
-              history: newHistory,
-              swaps: newSwaps !== undefined ? newSwaps : swaps,
-              custom: newCustom !== undefined ? newCustom : customBlocks,
-              timeMutations: newTimeMuts !== undefined ? newTimeMuts : timeMutations,
-            });
+            await pushRemote({ weekKey, checks: newChecks, dayBlocks: newDayBlocks, history: newHistory });
             setSyncStatus('synced');
           } catch { setSyncStatus('error'); }
         }, 2000);
       }
 
-      function toggleCheck(day, idxOrKey) {
-        // idxOrKey is either a number (hardcoded slot) or "cb_{id}" string (custom block)
-        const key = `${day}-${idxOrKey}`;
+      // Returns this day's block list. If never edited, initializes from hardcoded defaults.
+      // Returned blocks always have: id, time, activity, detail, category
+      // Hardcoded-origin blocks also have: defaultActivity, defaultCategory, defaultDetail
+      function getDayBlocks(dayName) {
+        const key = `${getDateForDay(dayName)}-${dayName}`;
+        if (dayBlocks[key]) return dayBlocks[key];
+        return schedule[dayName].blocks.map((b, i) => ({
+          id: `b_${i}`,
+          time: b.time,
+          activity: b.activity,
+          detail: b.detail,
+          category: b.category,
+          defaultActivity: b.activity,
+          defaultCategory: b.category,
+          defaultDetail: b.detail,
+        }));
+      }
+
+      function saveDayBlocks(dayName, blocks) {
+        const key = `${getDateForDay(dayName)}-${dayName}`;
+        // Always keep sorted by start time
+        const sorted = [...blocks].sort((a, b) => {
+          const ta = parseBlockTime(a.time);
+          const tb = parseBlockTime(b.time);
+          return (ta ? ta.start : 0) - (tb ? tb.start : 0);
+        });
+        const next = { ...dayBlocks, [key]: sorted };
+        setDayBlocks(next);
+        try { localStorage.setItem('schedule-dayblocks-v1', JSON.stringify(next)); } catch {}
+        schedulePush(checks, next, history);
+      }
+
+      function toggleCheck(dayName, blockId) {
+        const key = `${dayName}-${blockId}`;
         const next = { ...checks };
         if (next[key]) { delete next[key]; } else { next[key] = true; }
         setChecks(next);
-        try { localStorage.setItem(`schedule-v1-${weekKey}`, JSON.stringify(next)); } catch {}
-        schedulePush(next, overrides, history, swaps);
+        try { localStorage.setItem(`schedule-checks-v1-${weekKey}`, JSON.stringify(next)); } catch {}
+        schedulePush(next, dayBlocks, history);
       }
 
-      function applyOverride(dayName, idx, category, customText) {
-        const key = `${getDateForDay(dayName)}-${idx}`;
-        const next = { ...overrides, [key]: { category, custom: customText } };
-        setOverrides(next);
-        try { localStorage.setItem('schedule-overrides-v1', JSON.stringify(next)); } catch {}
-        setEditingBlock(null);
-        schedulePush(checks, next, history, swaps);
-      }
-
-      function resetOverride(dayName, idx) {
-        const key = `${getDateForDay(dayName)}-${idx}`;
-        const next = { ...overrides };
-        delete next[key];
-        setOverrides(next);
-        try { localStorage.setItem('schedule-overrides-v1', JSON.stringify(next)); } catch {}
-        setEditingBlock(null);
-        schedulePush(checks, next, history, swaps);
-      }
-
-      // Returns the block as it should be displayed (with override applied)
-      function getEffectiveBlock(dayName, block, idx) {
-        const key = `${getDateForDay(dayName)}-${idx}`;
-        const ov = overrides[key];
-        if (!ov) return { ...block, isOverridden: false };
-        // swapActivity is set when a cross-type (hardcoded↔custom) drag swap occurs
-        const activity = ov.swapActivity !== undefined
-          ? ov.swapActivity
-          : (ov.category === 'misc' ? (ov.custom || 'Misc') : categoryLabels[ov.category]);
-        const detail = ov.swapActivity !== undefined
-          ? (ov.swapDetail || '')
-          : (ov.custom || (ov.category !== 'misc' ? block.detail : ''));
-        return {
-          ...block,
-          category: ov.category,
-          activity,
-          detail,
-          isOverridden: true,
-          originalActivity: block.activity,
-        };
-      }
-
-      // Returns the content block for a given slot (applying DnD swap permutation)
-      function getPermutedContent(dayName, slotIdx) {
-        const dateKey = `${getDateForDay(dayName)}-${dayName}`;
-        const perm = swaps[dateKey];
-        const origIdx = perm ? (perm[slotIdx] ?? slotIdx) : slotIdx;
-        return schedule[dayName].blocks[origIdx];
-      }
-
-      function applySwap(dayName, slotA, slotB) {
-        const dateKey = `${getDateForDay(dayName)}-${dayName}`;
-        const len = schedule[dayName].blocks.length;
-        const current = swaps[dateKey] || Array.from({ length: len }, (_, k) => k);
-        const next = [...current];
-        [next[slotA], next[slotB]] = [next[slotB], next[slotA]];
-        const nextSwaps = { ...swaps, [dateKey]: next };
-        setSwaps(nextSwaps);
-        try { localStorage.setItem('schedule-swaps-v1', JSON.stringify(nextSwaps)); } catch {}
-        schedulePush(checks, overrides, history, nextSwaps);
-      }
-
-      function resetSwap(dayName) {
-        const dateKey = `${getDateForDay(dayName)}-${dayName}`;
-        const nextSwaps = { ...swaps };
-        delete nextSwaps[dateKey];
-        setSwaps(nextSwaps);
-        try { localStorage.setItem('schedule-swaps-v1', JSON.stringify(nextSwaps)); } catch {}
-        schedulePush(checks, overrides, history, nextSwaps);
-      }
-
-      // Unified swap: handles hardcoded↔hardcoded, custom↔custom, and cross-type
-      function applySwapAny(dayName, blockA, blockB) {
-        const dateStr = getDateForDay(dayName);
-        if (blockA._type === 'hardcoded' && blockB._type === 'hardcoded') {
-          applySwap(dayName, blockA._slotIdx, blockB._slotIdx);
-        } else if (blockA._type === 'custom' && blockB._type === 'custom') {
-          const cbKey = `${dateStr}-${dayName}`;
-          const cbs = customBlocks[cbKey] || [];
-          const a = cbs.find(b => b.id === blockA.id);
-          const b_ = cbs.find(b => b.id === blockB.id);
-          if (!a || !b_) return;
-          const nextCustom = { ...customBlocks, [cbKey]: cbs.map(cb => {
-            if (cb.id === blockA.id) return { ...cb, activity: b_.activity, detail: b_.detail, category: b_.category };
-            if (cb.id === blockB.id) return { ...cb, activity: a.activity, detail: a.detail, category: a.category };
-            return cb;
-          })};
-          // Clear any stale category overrides on both custom blocks so the new content shows cleanly
-          const nextOverrides = { ...overrides };
-          delete nextOverrides[`${dateStr}-cb_${blockA.id}`];
-          delete nextOverrides[`${dateStr}-cb_${blockB.id}`];
-          setOverrides(nextOverrides);
-          setCustomBlocks(nextCustom);
-          try {
-            localStorage.setItem('schedule-overrides-v1', JSON.stringify(nextOverrides));
-            localStorage.setItem('schedule-custom-v1', JSON.stringify(nextCustom));
-          } catch {}
-          schedulePush(checks, nextOverrides, history, swaps, nextCustom, timeMutations);
+      // Apply a category override to a block — edits the block content directly
+      function editBlockCategory(dayName, blockId, category, customText) {
+        const blocks = getDayBlocks(dayName);
+        const target = blocks.find(b => b.id === blockId);
+        if (!target) return;
+        const isCustomBlock = blockId.startsWith('cb_');
+        let updates;
+        if (category === 'misc') {
+          updates = {
+            category: 'misc',
+            activity: customText || (isCustomBlock ? target.activity : 'Misc'),
+            detail: target.detail,
+          };
         } else {
-          // Cross-type: one hardcoded, one custom
-          const hb = blockA._type === 'hardcoded' ? blockA : blockB;
-          const cb = blockA._type === 'custom' ? blockA : blockB;
-          // Get hardcoded block's current effective content
-          const hardContent = getPermutedContent(dayName, hb._slotIdx);
-          const hardOv = overrides[`${dateStr}-${hb._slotIdx}`];
-          const hardActivity = hardOv
-            ? (hardOv.swapActivity !== undefined ? hardOv.swapActivity : (hardOv.category === 'misc' ? (hardOv.custom || 'Misc') : categoryLabels[hardOv.category]))
-            : hardContent.activity;
-          const hardDetail = hardOv
-            ? (hardOv.swapActivity !== undefined ? (hardOv.swapDetail || '') : (hardOv.custom || hardContent.detail))
-            : hardContent.detail;
-          const hardCat = hardOv ? hardOv.category : hardContent.category;
-          // Override hardcoded slot with custom block's content
-          const nextOverrides = { ...overrides, [`${dateStr}-${hb._slotIdx}`]: {
-            category: cb.category, swapActivity: cb.activity, swapDetail: cb.detail || '',
-          }};
-          // Clear any stale override on the custom block so its new content shows cleanly
-          delete nextOverrides[`${dateStr}-cb_${cb.id}`];
-          // Update custom block with hardcoded's content
-          const cbKey = `${dateStr}-${dayName}`;
-          const nextCustom = { ...customBlocks, [cbKey]: (customBlocks[cbKey] || []).map(b =>
-            b.id === cb.id ? { ...b, activity: hardActivity, detail: hardDetail, category: hardCat } : b
-          )};
-          setOverrides(nextOverrides);
-          setCustomBlocks(nextCustom);
-          try {
-            localStorage.setItem('schedule-overrides-v1', JSON.stringify(nextOverrides));
-            localStorage.setItem('schedule-custom-v1', JSON.stringify(nextCustom));
-          } catch {}
-          schedulePush(checks, nextOverrides, history, swaps, nextCustom, timeMutations);
+          updates = {
+            category,
+            // Hardcoded blocks rename to category label; custom blocks keep their name
+            activity: isCustomBlock ? target.activity : categoryLabels[category],
+            detail: target.detail,
+          };
         }
+        const next = blocks.map(b => b.id === blockId ? { ...b, ...updates } : b);
+        saveDayBlocks(dayName, next);
+        setEditingBlock(null);
       }
 
-      // Delete any block for the current day (hardcoded: hide via mutation; custom: remove)
-      function deleteBlock(dayName, blockData, dateStr) {
-        if (blockData._type === 'custom') {
-          removeCustomBlock(dayName, dateStr, blockData.id);
-        } else {
-          const mutKey = `${dateStr}-${dayName}-${blockData._slotIdx}`;
-          const nextMuts = { ...timeMutations, [mutKey]: { hidden: true } };
-          setTimeMutations(nextMuts);
-          try { localStorage.setItem('schedule-timemut-v1', JSON.stringify(nextMuts)); } catch {}
-          schedulePush(checks, overrides, history, swaps, customBlocks, nextMuts);
-        }
-      }
-
-      function computeOverlapTrimming(dayName, dateStr, newStart, newEnd, cbId) {
-        const mutations = {};
-        schedule[dayName].blocks.forEach((block, i) => {
-          const mutKey = `${dateStr}-${dayName}-${i}`;
-          const existingMut = timeMutations[mutKey];
-          if (existingMut?.hidden) return; // already hidden
-          // Don't overwrite a user-intentional time edit (mutations without causedBy)
-          if (existingMut && !existingMut.causedBy) return;
-          // Use effective (possibly already-mutated) times for correct overlap detection
-          const t = existingMut
-            ? { start: existingMut.newStart, end: existingMut.newEnd }
-            : parseBlockTime(block.time);
-          if (!t) return;
-          const { start, end } = t;
-          if (end <= newStart || start >= newEnd) return; // no overlap
-          if (start >= newStart && end <= newEnd) {
-            mutations[mutKey] = { hidden: true, causedBy: cbId };
-          } else if (start < newStart) {
-            mutations[mutKey] = { newStart: start, newEnd: newStart, causedBy: cbId };
-          } else {
-            mutations[mutKey] = { newStart: newEnd, newEnd: end, causedBy: cbId };
-          }
+      // Reset a hardcoded block back to its default content
+      function resetBlock(dayName, blockId) {
+        const blocks = getDayBlocks(dayName);
+        const next = blocks.map(b => {
+          if (b.id !== blockId) return b;
+          return {
+            ...b,
+            category: b.defaultCategory,
+            activity: b.defaultActivity,
+            detail: b.defaultDetail,
+          };
         });
-        return mutations;
+        saveDayBlocks(dayName, next);
+        setEditingBlock(null);
       }
 
-      function saveNewBlock(dayName, dateStr, newBlockData) {
-        const cbKey = `${dateStr}-${dayName}`;
-        const mutations = computeOverlapTrimming(dayName, dateStr, newBlockData.startMinutes, newBlockData.endMinutes, newBlockData.id);
-        const nextMuts = { ...timeMutations, ...mutations };
-        const nextCustom = { ...customBlocks, [cbKey]: [...(customBlocks[cbKey] || []), newBlockData] };
-        setTimeMutations(nextMuts);
-        setCustomBlocks(nextCustom);
-        try {
-          localStorage.setItem('schedule-custom-v1', JSON.stringify(nextCustom));
-          localStorage.setItem('schedule-timemut-v1', JSON.stringify(nextMuts));
-        } catch {}
-        schedulePush(checks, overrides, history, swaps, nextCustom, nextMuts);
-      }
+      // Edit a block's time; adjacent blocks auto-adjust
+      function editBlockTime(dayName, blockId, newStart, newEnd) {
+        const blocks = getDayBlocks(dayName);
+        // Find sorted position to identify neighbors
+        const sorted = [...blocks].sort((a, b) => {
+          const ta = parseBlockTime(a.time);
+          const tb = parseBlockTime(b.time);
+          return (ta ? ta.start : 0) - (tb ? tb.start : 0);
+        });
+        const idx = sorted.findIndex(b => b.id === blockId);
+        const prevBlock = idx > 0 ? sorted[idx - 1] : null;
+        const nextBlock = idx < sorted.length - 1 ? sorted[idx + 1] : null;
 
-      function removeCustomBlock(dayName, dateStr, blockId) {
-        const cbKey = `${dateStr}-${dayName}`;
-        const nextCustom = { ...customBlocks, [cbKey]: (customBlocks[cbKey] || []).filter(b => b.id !== blockId) };
-        // Restore any time mutations caused by this block
-        const nextMuts = { ...timeMutations };
-        Object.keys(nextMuts).forEach(k => { if (nextMuts[k].causedBy === blockId) delete nextMuts[k]; });
-        setCustomBlocks(nextCustom);
-        setTimeMutations(nextMuts);
-        try {
-          localStorage.setItem('schedule-custom-v1', JSON.stringify(nextCustom));
-          localStorage.setItem('schedule-timemut-v1', JSON.stringify(nextMuts));
-        } catch {}
-        schedulePush(checks, overrides, history, swaps, nextCustom, nextMuts);
-      }
-
-      // Build the sorted merged block list for a day (used by render + applyTimeEdit)
-      function getDisplayBlocks(dayName) {
-        const dateStr = getDateForDay(dayName);
-        const cbKey = `${dateStr}-${dayName}`;
-        const hardcoded = schedule[dayName].blocks.map((block, i) => {
-          const mut = timeMutations[`${dateStr}-${dayName}-${i}`];
-          if (mut?.hidden) return null;
-          const effectiveTime = mut ? minutesToTimeString(mut.newStart, mut.newEnd) : block.time;
-          return { ...block, time: effectiveTime, _type: 'hardcoded', _slotIdx: i };
+        let updated = blocks.map(b => {
+          if (b.id === blockId) {
+            if (newEnd <= newStart) return null;
+            return { ...b, time: minutesToTimeString(newStart, newEnd) };
+          }
+          if (prevBlock && b.id === prevBlock.id) {
+            const pt = parseBlockTime(b.time);
+            if (!pt || newStart <= pt.start) return b; // no change
+            const newEnd2 = newStart;
+            if (newEnd2 <= pt.start) return null; // squeezed to zero
+            return { ...b, time: minutesToTimeString(pt.start, newEnd2) };
+          }
+          if (nextBlock && b.id === nextBlock.id) {
+            const nt = parseBlockTime(b.time);
+            if (!nt || newEnd >= nt.end) return null; // squeezed to zero
+            return { ...b, time: minutesToTimeString(newEnd, nt.end) };
+          }
+          return b;
         }).filter(Boolean);
-        const custom = (customBlocks[cbKey] || []).map(cb => ({ ...cb, _type: 'custom' }));
-        return [...hardcoded, ...custom].sort((a, b) => {
-          const ta = parseBlockTime(a.time); const tb = parseBlockTime(b.time);
-          return (ta?.start ?? 0) - (tb?.start ?? 0);
-        });
+
+        saveDayBlocks(dayName, updated);
       }
 
-      function applyTimeEdit(dayName, dateStr, targetBlock, renderIdx, newStart, newEnd) {
-        const allBlocks = getDisplayBlocks(dayName);
-        const nextMuts = { ...timeMutations };
-        const nextCustom = { ...customBlocks };
-        const cbKey = `${dateStr}-${dayName}`;
-        if (nextCustom[cbKey]) nextCustom[cbKey] = [...nextCustom[cbKey]];
+      // Add a new custom block, trimming any overlapping existing blocks
+      function addBlock(dayName, newBlockData) {
+        const { startMinutes: ns, endMinutes: ne, ...rest } = newBlockData;
+        const blocks = getDayBlocks(dayName);
+        const adjusted = blocks.map(b => {
+          const t = parseBlockTime(b.time);
+          if (!t) return b;
+          const { start, end } = t;
+          if (end <= ns || start >= ne) return b;          // no overlap
+          if (start >= ns && end <= ne) return null;        // fully covered
+          if (start < ns) return { ...b, time: minutesToTimeString(start, ns) }; // trim end
+          return { ...b, time: minutesToTimeString(ne, end) };                    // trim start
+        }).filter(Boolean);
+        const newBlock = {
+          id: `cb_${Date.now()}`,
+          time: minutesToTimeString(ns, ne),
+          ...rest,
+        };
+        saveDayBlocks(dayName, [...adjusted, newBlock]);
+        setAddingBlock(null);
+      }
 
-        function setBlockTime(block, start, end) {
-          if (block._type === 'hardcoded') {
-            const mutKey = `${dateStr}-${dayName}-${block._slotIdx}`;
-            if (start >= end) { nextMuts[mutKey] = { hidden: true }; }
-            else { nextMuts[mutKey] = { newStart: start, newEnd: end }; }
-          } else {
-            if (!nextCustom[cbKey]) return;
-            if (start >= end) {
-              nextCustom[cbKey] = nextCustom[cbKey].filter(cb => cb.id !== block.id);
-            } else {
-              const timeStr = minutesToTimeString(start, end);
-              nextCustom[cbKey] = nextCustom[cbKey].map(cb =>
-                cb.id === block.id ? { ...cb, time: timeStr, startMinutes: start, endMinutes: end } : cb
-              );
-            }
-          }
-        }
+      // Delete a block (any type)
+      function deleteBlock(dayName, blockId) {
+        const blocks = getDayBlocks(dayName);
+        saveDayBlocks(dayName, blocks.filter(b => b.id !== blockId));
+        setEditingBlock(null);
+      }
 
-        setBlockTime(targetBlock, newStart, newEnd);
-
-        // Extend/trim previous block's end to match new start
-        const prevBlock = renderIdx > 0 ? allBlocks[renderIdx - 1] : null;
-        if (prevBlock) {
-          const pt = parseBlockTime(prevBlock.time);
-          if (pt) setBlockTime(prevBlock, pt.start, newStart);
-        }
-        // Extend/trim next block's start to match new end
-        const nextBlock = renderIdx < allBlocks.length - 1 ? allBlocks[renderIdx + 1] : null;
-        if (nextBlock) {
-          const nt = parseBlockTime(nextBlock.time);
-          if (nt) setBlockTime(nextBlock, newEnd, nt.end);
-        }
-
-        setTimeMutations(nextMuts);
-        setCustomBlocks(nextCustom);
-        try {
-          localStorage.setItem('schedule-timemut-v1', JSON.stringify(nextMuts));
-          localStorage.setItem('schedule-custom-v1', JSON.stringify(nextCustom));
-        } catch {}
-        schedulePush(checks, overrides, history, swaps, nextCustom, nextMuts);
+      // Swap content (activity, detail, category) between two blocks; times stay fixed
+      function swapBlockContents(dayName, idA, idB) {
+        const blocks = getDayBlocks(dayName);
+        const a = blocks.find(b => b.id === idA);
+        const bBlk = blocks.find(b => b.id === idB);
+        if (!a || !bBlk) return;
+        const next = blocks.map(b => {
+          if (b.id === idA) return { ...b, activity: bBlk.activity, detail: bBlk.detail, category: bBlk.category };
+          if (b.id === idB) return { ...b, activity: a.activity, detail: a.detail, category: a.category };
+          return b;
+        });
+        saveDayBlocks(dayName, next);
       }
 
       function getActualHours() {
         const actual = {};
         legend.forEach(cat => actual[cat] = 0);
-        days.forEach(day => {
-          const dateStr = getDateForDay(day);
-          // Hardcoded blocks (with swap + override applied)
-          schedule[day].blocks.forEach((block, i) => {
-            if (checks[`${day}-${i}`]) {
-              const mut = timeMutations[`${dateStr}-${day}-${i}`];
-              if (mut?.hidden) return;
-              const contentBlock = getPermutedContent(day, i);
-              if (contentBlock.category === 'break') return;
-              const effective = getEffectiveBlock(day, contentBlock, i);
-              const effectiveTime = mut ? minutesToTimeString(mut.newStart, mut.newEnd) : block.time;
-              const t = parseBlockTime(effectiveTime);
-              if (t && actual[effective.category] !== undefined) actual[effective.category] += t.duration;
-            }
-          });
-          // Custom blocks
-          const cbKey = `${dateStr}-${day}`;
-          (customBlocks[cbKey] || []).forEach(cb => {
-            if (checks[`${day}-cb_${cb.id}`]) {
-              const ov = overrides[`${dateStr}-cb_${cb.id}`];
-              const effectiveCat = ov ? ov.category : cb.category;
-              const t = parseBlockTime(cb.time);
-              if (t && actual[effectiveCat] !== undefined) actual[effectiveCat] += t.duration;
+        days.forEach(dayName => {
+          getDayBlocks(dayName).forEach(block => {
+            if (block.category === 'break') return;
+            if (checks[`${dayName}-${block.id}`]) {
+              const t = parseBlockTime(block.time);
+              if (t && actual[block.category] !== undefined) actual[block.category] += t.duration;
             }
           });
         });
@@ -1183,9 +1014,9 @@
       }
 
       const actualHours = getActualHours();
-      const day = schedule[activeDay];
+      const day = schedule[activeDay] || schedule[todayName];
       const totalBlocks = days.reduce((sum, d) =>
-        sum + schedule[d].blocks.filter(b => b.category !== 'break').length, 0);
+        sum + getDayBlocks(d).filter(b => b.category !== 'break').length, 0);
       const completedBlocks = Object.keys(checks).length;
 
       return (
@@ -1291,159 +1122,120 @@
           )}
 
           {/* Day View */}
-          {activeDay !== 'History' && <div className="max-w-3xl mx-auto">
-            <div className="mb-6">
-              <h2 className="text-2xl font-bold text-zinc-100">
-                {activeDay}
-                {activeDay === todayName && (
-                  <span style={{
-                    fontSize: '11px', fontWeight: 400, color: '#71717a',
-                    marginLeft: '10px', fontFamily: 'monospace',
-                    textTransform: 'uppercase', letterSpacing: '0.06em',
-                  }}>today</span>
-                )}
-              </h2>
-              <p className="text-zinc-500 text-sm mt-0\.5 italic">{day.theme}</p>
-            </div>
+          {activeDay !== 'History' && (
+            <div className="max-w-3xl mx-auto">
+              <div className="mb-6">
+                <h2 className="text-2xl font-bold text-zinc-100">
+                  {activeDay}
+                  {activeDay === todayName && (
+                    <span style={{
+                      fontSize: '11px', fontWeight: 400, color: '#71717a',
+                      marginLeft: '10px', fontFamily: 'monospace',
+                      textTransform: 'uppercase', letterSpacing: '0.06em',
+                    }}>today</span>
+                  )}
+                </h2>
+                <p className="text-zinc-500 text-sm mt-0\.5 italic">{schedule[activeDay].theme}</p>
+              </div>
 
-            {(() => {
-              const dateStr = getDateForDay(activeDay);
-              const cbKey = `${dateStr}-${activeDay}`;
-              // Build merged block list: hardcoded (with time mutations) + custom
-              const hardcoded = day.blocks.map((block, i) => {
-                const mut = timeMutations[`${dateStr}-${activeDay}-${i}`];
-                if (mut?.hidden) return null;
-                const effectiveTime = mut ? minutesToTimeString(mut.newStart, mut.newEnd) : block.time;
-                return { ...block, time: effectiveTime, _type: 'hardcoded', _slotIdx: i };
-              }).filter(Boolean);
-              const custom = (customBlocks[cbKey] || []).map(cb => ({ ...cb, _type: 'custom' }));
-              const allBlocks = [...hardcoded, ...custom].sort((a, b) => {
-                const ta = parseBlockTime(a.time); const tb = parseBlockTime(b.time);
-                return (ta?.start ?? 0) - (tb?.start ?? 0);
-              });
+              <div className="space-y-3">
+                {getDayBlocks(activeDay).map((block, renderIdx) => {
+                  const isCustom = block.id.startsWith('cb_');
+                  const isBreak = block.category === 'break';
+                  const isChecked = !!checks[`${activeDay}-${block.id}`];
+                  const blockTime = parseBlockTime(block.time);
+                  const isNow = activeDay === todayName && blockTime && nowMinutes >= blockTime.start && nowMinutes < blockTime.end;
+                  const isOverridden = !isCustom && block.defaultCategory !== undefined && (
+                    block.category !== block.defaultCategory || block.activity !== block.defaultActivity
+                  );
+                  const c = categoryColors[block.category] || categoryColors.misc;
+                  const hex = categoryAccentHex[block.category] || categoryAccentHex.misc;
+                  const isDragOver = !isBreak && dragOverIdx === block.id;
 
-              return (
-                <div className="space-y-3">
-                  {allBlocks.map((block, renderIdx) => {
-                    const isCustom = block._type === 'custom';
-                    const checkKey = isCustom ? `${activeDay}-cb_${block.id}` : `${activeDay}-${block._slotIdx}`;
-                    const overrideKey = isCustom ? `${dateStr}-cb_${block.id}` : null;
-
-                    // Content block (apply swap for hardcoded, identity for custom)
-                    const contentBlock = isCustom ? block : getPermutedContent(activeDay, block._slotIdx);
-                    // Apply override on top
-                    const ov = overrideKey ? overrides[overrideKey] : (isCustom ? null : overrides[`${dateStr}-${block._slotIdx}`]);
-                    const effective = ov
-                      ? {
-                          ...contentBlock,
-                          category: ov.category,
-                          // Custom blocks keep their user-given name; override only recolors.
-                          // Exception: if user explicitly renamed via "Misc / Other…" text input.
-                          activity: isCustom
-                            ? (ov.category === 'misc' && ov.custom ? ov.custom : contentBlock.activity)
-                            : (ov.category === 'misc' ? (ov.custom || 'Misc') : categoryLabels[ov.category]),
-                          detail: ov.custom || contentBlock.detail,
-                          isOverridden: true,
-                          originalActivity: contentBlock.activity,
+                  return (
+                    <div
+                      key={block.id}
+                      draggable={!isBreak}
+                      className={`block-card rounded-lg border ${c.border} ${c.bg} px-5 py-4 flex items-start gap-4${isDragOver ? ' drag-over' : ''}`}
+                      onDragStart={!isBreak ? () => { dragState.current = { blockId: block.id, dayName: activeDay }; } : undefined}
+                      onDragOver={!isBreak ? (e => {
+                        e.preventDefault();
+                        if (dragState.current.blockId !== block.id) setDragOverIdx(block.id);
+                      }) : undefined}
+                      onDragLeave={!isBreak ? () => setDragOverIdx(null) : undefined}
+                      onDrop={!isBreak ? (e => {
+                        e.preventDefault();
+                        setDragOverIdx(null);
+                        const { blockId: srcId, dayName: srcDay } = dragState.current;
+                        if (srcId && srcId !== block.id && srcDay === activeDay) {
+                          swapBlockContents(activeDay, srcId, block.id);
                         }
-                      : { ...contentBlock, isOverridden: false };
-
-                    const c = categoryColors[effective.category] || categoryColors.misc;
-                    const hex = categoryAccentHex[effective.category] || categoryAccentHex.misc;
-                    const isChecked = !!checks[checkKey];
-                    const blockTime = parseBlockTime(block.time);
-                    const isNow = activeDay === todayName && blockTime && nowMinutes >= blockTime.start && nowMinutes < blockTime.end;
-                    const isBreak = contentBlock.category === 'break' && !effective.isOverridden;
-                    const blockDragKey = isCustom ? `cb_${block.id}` : String(block._slotIdx);
-                    const isDragOver = !isBreak && dragOverIdx === blockDragKey;
-
-                    return (
-                      <div
-                        key={isCustom ? `cb_${block.id}` : block._slotIdx}
-                        draggable={!isBreak}
-                        className={`block-card rounded-lg border ${c.border} ${c.bg} px-5 py-4 flex items-start gap-4${isDragOver ? ' drag-over' : ''}`}
-                        onDragStart={!isBreak ? () => { dragState.current = { sourceBlock: block, dayName: activeDay }; } : undefined}
-                        onDragOver={!isBreak ? (e => {
-                          e.preventDefault();
-                          const srcKey = dragState.current.sourceBlock ? (dragState.current.sourceBlock._type === 'custom' ? `cb_${dragState.current.sourceBlock.id}` : String(dragState.current.sourceBlock._slotIdx)) : null;
-                          if (srcKey !== blockDragKey) setDragOverIdx(blockDragKey);
-                        }) : undefined}
-                        onDragLeave={!isBreak ? () => setDragOverIdx(null) : undefined}
-                        onDrop={!isBreak ? (e => {
-                          e.preventDefault();
-                          setDragOverIdx(null);
-                          const { sourceBlock, dayName } = dragState.current;
-                          const srcKey = sourceBlock ? (sourceBlock._type === 'custom' ? `cb_${sourceBlock.id}` : String(sourceBlock._slotIdx)) : null;
-                          if (sourceBlock && srcKey !== blockDragKey && dayName === activeDay) {
-                            applySwapAny(activeDay, sourceBlock, block);
-                          }
-                          dragState.current = { sourceBlock: null, dayName: null };
-                          justDropped.current = true;
-                          setTimeout(() => { justDropped.current = false; }, 100);
-                        }) : undefined}
-                        onDragEnd={!isBreak ? () => { setDragOverIdx(null); dragState.current = { sourceBlock: null, dayName: null }; } : undefined}
-                        onClick={() => {
-                          if (justDropped.current) return;
-                          if (!isBreak) setEditingBlock({ day: activeDay, idx: isCustom ? `cb_${block.id}` : block._slotIdx, isCustom, customBlock: isCustom ? block : null, renderIdx, blockData: block });
-                        }}
-                        style={{
-                          opacity: isChecked ? 0.42 : 1,
-                          boxShadow: isNow ? `0 0 0 1px ${hex}70, inset 0 0 40px ${hex}0a` : 'none',
-                          cursor: isBreak ? 'default' : undefined,
-                        }}
-                      >
-                        <div className="mt-1\.5 flex-shrink-0">
-                          <div className={`w-2 h-2 rounded-full ${c.accent}`} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-baseline justify-between gap-2 flex-wrap">
-                            <span className={`text-base font-semibold ${c.text}`} style={{ textDecoration: isChecked ? 'line-through' : 'none', textDecorationColor: 'rgba(255,255,255,0.25)' }}>
-                              {effective.activity}
-                              {isNow && <span className="now-badge" style={{ background: hex }}>NOW</span>}
-                              {isCustom && <span style={{ fontSize: '10px', color: '#52525b', marginLeft: '8px', fontFamily: 'monospace', fontWeight: 400 }}>+ added</span>}
-                              {effective.isOverridden && <span style={{ fontSize: '10px', color: '#52525b', marginLeft: '8px', fontFamily: 'monospace', fontWeight: 400 }}>↺ was {effective.originalActivity}</span>}
-                            </span>
-                            <span className="text-zinc-500 text-xs font-mono">{block.time}</span>
-                          </div>
-                          <p className="text-zinc-300 text-sm mt-0\.5">{effective.detail}</p>
-                        </div>
-                        {!isBreak && (
-                          <button
-                            onClick={e => { e.stopPropagation(); toggleCheck(activeDay, isCustom ? `cb_${block.id}` : block._slotIdx); }}
-                            title={isChecked ? "Mark incomplete" : "Mark done"}
-                            style={{ width: '24px', height: '24px', borderRadius: '50%', flexShrink: 0, marginTop: '1px', border: isChecked ? 'none' : '1.5px solid rgba(100,100,110,0.45)', background: isChecked ? hex : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s ease', fontSize: '12px', color: '#09090b', fontWeight: 700, lineHeight: 1 }}
-                          >
-                            {isChecked && '✓'}
-                          </button>
-                        )}
+                        dragState.current = { blockId: null, dayName: null };
+                        justDropped.current = true;
+                        setTimeout(() => { justDropped.current = false; }, 100);
+                      }) : undefined}
+                      onDragEnd={!isBreak ? () => { setDragOverIdx(null); dragState.current = { blockId: null, dayName: null }; } : undefined}
+                      onClick={() => {
+                        if (justDropped.current) return;
+                        if (!isBreak) setEditingBlock({ day: activeDay, block, renderIdx });
+                      }}
+                      style={{
+                        opacity: isChecked ? 0.42 : 1,
+                        boxShadow: isNow ? `0 0 0 1px ${hex}70, inset 0 0 40px ${hex}0a` : 'none',
+                        cursor: isBreak ? 'default' : undefined,
+                      }}
+                    >
+                      <div className="mt-1\.5 flex-shrink-0">
+                        <div className={`w-2 h-2 rounded-full ${c.accent}`} />
                       </div>
-                    );
-                  })}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-baseline justify-between gap-2 flex-wrap">
+                          <span className={`text-base font-semibold ${c.text}`} style={{ textDecoration: isChecked ? 'line-through' : 'none', textDecorationColor: 'rgba(255,255,255,0.25)' }}>
+                            {block.activity}
+                            {isNow && <span className="now-badge" style={{ background: hex }}>NOW</span>}
+                            {isCustom && <span style={{ fontSize: '10px', color: '#52525b', marginLeft: '8px', fontFamily: 'monospace', fontWeight: 400 }}>+ added</span>}
+                            {isOverridden && <span style={{ fontSize: '10px', color: '#52525b', marginLeft: '8px', fontFamily: 'monospace', fontWeight: 400 }}>↺ was {block.defaultActivity}</span>}
+                          </span>
+                          <span className="text-zinc-500 text-xs font-mono">{block.time}</span>
+                        </div>
+                        <p className="text-zinc-300 text-sm mt-0\.5">{block.detail}</p>
+                      </div>
+                      {!isBreak && (
+                        <button
+                          onClick={e => { e.stopPropagation(); toggleCheck(activeDay, block.id); }}
+                          title={isChecked ? "Mark incomplete" : "Mark done"}
+                          style={{ width: '24px', height: '24px', borderRadius: '50%', flexShrink: 0, marginTop: '1px', border: isChecked ? 'none' : '1.5px solid rgba(100,100,110,0.45)', background: isChecked ? hex : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s ease', fontSize: '12px', color: '#09090b', fontWeight: 700, lineHeight: 1 }}
+                        >
+                          {isChecked && '✓'}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Add block button */}
+              <button
+                onClick={() => setAddingBlock({ day: activeDay })}
+                style={{ width: '100%', marginTop: '8px', padding: '10px', borderRadius: '8px', border: '1px dashed rgba(255,255,255,0.12)', background: 'transparent', color: '#52525b', fontSize: '13px', cursor: 'pointer', fontFamily: 'Georgia, serif', transition: 'all 0.15s ease' }}
+                onMouseEnter={e => { e.target.style.borderColor = 'rgba(255,255,255,0.25)'; e.target.style.color = '#a1a1aa'; }}
+                onMouseLeave={e => { e.target.style.borderColor = 'rgba(255,255,255,0.12)'; e.target.style.color = '#52525b'; }}
+              >
+                + Add block
+              </button>
+
+              {activeDay === "Saturday" && (
+                <div className="mt-6 rounded-lg border border-amber-400-20 bg-amber-950-30 px-5 py-4">
+                  <p className="text-amber-300-80 text-sm italic">Saturday is the most important LSAT day of the week. Treat it like the real test — same time of day, no phone, no music. Review happens Sunday when you're fresh.</p>
                 </div>
-              );
-            })()}
-
-            {/* Add block button */}
-            <button
-              onClick={() => setAddingBlock({ day: activeDay, date: getDateForDay(activeDay) })}
-              style={{ width: '100%', marginTop: '8px', padding: '10px', borderRadius: '8px', border: '1px dashed rgba(255,255,255,0.12)', background: 'transparent', color: '#52525b', fontSize: '13px', cursor: 'pointer', fontFamily: 'Georgia, serif', transition: 'all 0.15s ease' }}
-              onMouseEnter={e => { e.target.style.borderColor = 'rgba(255,255,255,0.25)'; e.target.style.color = '#a1a1aa'; }}
-              onMouseLeave={e => { e.target.style.borderColor = 'rgba(255,255,255,0.12)'; e.target.style.color = '#52525b'; }}
-            >
-              + Add block
-            </button>
-
-            {activeDay === "Saturday" && (
-              <div className="mt-6 rounded-lg border border-amber-400-20 bg-amber-950-30 px-5 py-4">
-                <p className="text-amber-300-80 text-sm italic">Saturday is the most important LSAT day of the week. Treat it like the real test — same time of day, no phone, no music. Review happens Sunday when you're fresh.</p>
-              </div>
-            )}
-            {activeDay === "Sunday" && (
-              <div className="mt-6 rounded-lg border border-zinc-700-40 bg-zinc-900 px-5 py-4">
-                <p className="text-zinc-400 text-sm italic">Sunday does double duty — test review in the morning while it's fresh enough to be useful but distant enough to not feel brutal, then a proper weekly reset. The review and weekly planning are the two non-negotiables; everything else is flex.</p>
-              </div>
-            )}
-          </div>}
+              )}
+              {activeDay === "Sunday" && (
+                <div className="mt-6 rounded-lg border border-zinc-700-40 bg-zinc-900 px-5 py-4">
+                  <p className="text-zinc-400 text-sm italic">Sunday does double duty — test review in the morning while it's fresh enough to be useful but distant enough to not feel brutal, then a proper weekly reset. The review and weekly planning are the two non-negotiables; everything else is flex.</p>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Weekly Scoreboard */}
           <div className="max-w-3xl mx-auto mt-12 border-t border-zinc-800 pt-8">
@@ -1480,43 +1272,34 @@
           {/* Override Modal */}
           {editingBlock && (
             <OverrideModal
-              block={(() => {
-                const b = editingBlock.isCustom ? editingBlock.customBlock : getPermutedContent(editingBlock.day, editingBlock.idx);
-                return { ...b, time: editingBlock.blockData.time };
-              })()}
+              block={editingBlock.block}
               dayName={editingBlock.day}
-              idx={editingBlock.idx}
-              overrides={overrides}
-              hasSwap={!editingBlock.isCustom && !!swaps[`${getDateForDay(editingBlock.day)}-${editingBlock.day}`]}
-              onApply={applyOverride}
-              onReset={resetOverride}
-              onResetSwap={() => resetSwap(editingBlock.day)}
-              onDelete={() => {
-                deleteBlock(editingBlock.day, editingBlock.blockData, getDateForDay(editingBlock.day));
-                setEditingBlock(null);
-              }}
+              onApply={editBlockCategory}
+              onReset={resetBlock}
+              onDelete={() => deleteBlock(editingBlock.day, editingBlock.block.id)}
               onEditTime={() => {
-                setEditingTime({ day: editingBlock.day, date: getDateForDay(editingBlock.day), block: editingBlock.blockData, renderIdx: editingBlock.renderIdx });
+                setEditingTime({ day: editingBlock.day, block: editingBlock.block });
                 setEditingBlock(null);
               }}
               onClose={() => setEditingBlock(null)}
             />
           )}
+
+          {/* Edit Time Modal */}
           {editingTime && (
             <EditTimeModal
               block={editingTime.block}
               dayName={editingTime.day}
-              dateStr={editingTime.date}
-              renderIdx={editingTime.renderIdx}
-              onSave={applyTimeEdit}
+              onSave={editBlockTime}
               onClose={() => setEditingTime(null)}
             />
           )}
+
+          {/* Add Block Modal */}
           {addingBlock && (
             <AddBlockModal
               dayName={addingBlock.day}
-              dateStr={addingBlock.date}
-              onSave={saveNewBlock}
+              onSave={addBlock}
               onClose={() => setAddingBlock(null)}
             />
           )}

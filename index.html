@@ -447,7 +447,9 @@
       } else if (mer === 'pm') {
         if (h !== 12) h += 12;
       } else {
-        if (h !== 11) h += 12;
+        // Schedule runs 11am–11pm. No-meridiem rules:
+        // 11 → 11am, 12 → 12pm (noon), 1–10 → pm
+        if (h !== 11 && h !== 12) h += 12;
       }
       return h * 60 + min;
     }
@@ -1030,18 +1032,23 @@
       function computeOverlapTrimming(dayName, dateStr, newStart, newEnd, cbId) {
         const mutations = {};
         schedule[dayName].blocks.forEach((block, i) => {
-          const t = parseBlockTime(block.time);
+          const mutKey = `${dateStr}-${dayName}-${i}`;
+          const existingMut = timeMutations[mutKey];
+          if (existingMut?.hidden) return; // already hidden
+          // Don't overwrite a user-intentional time edit (mutations without causedBy)
+          if (existingMut && !existingMut.causedBy) return;
+          // Use effective (possibly already-mutated) times for correct overlap detection
+          const t = existingMut
+            ? { start: existingMut.newStart, end: existingMut.newEnd }
+            : parseBlockTime(block.time);
           if (!t) return;
           const { start, end } = t;
           if (end <= newStart || start >= newEnd) return; // no overlap
-          const mutKey = `${dateStr}-${dayName}-${i}`;
           if (start >= newStart && end <= newEnd) {
             mutations[mutKey] = { hidden: true, causedBy: cbId };
           } else if (start < newStart) {
-            // Existing block's tail overlaps — trim end
             mutations[mutKey] = { newStart: start, newEnd: newStart, causedBy: cbId };
           } else {
-            // Existing block's head overlaps — trim start
             mutations[mutKey] = { newStart: newEnd, newEnd: end, causedBy: cbId };
           }
         });

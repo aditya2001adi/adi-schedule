@@ -665,7 +665,7 @@
 
     // ── Override Modal ────────────────────────────────────────────────────────
 
-    function OverrideModal({ block, dayName, idx, overrides, hasSwap, isCustom, onApply, onReset, onResetSwap, onRemoveCustom, onEditTime, onClose }) {
+    function OverrideModal({ block, dayName, idx, overrides, hasSwap, onApply, onReset, onResetSwap, onDelete, onEditTime, onClose }) {
       const [showMisc, setShowMisc] = useState(false);
       const [miscText, setMiscText] = useState('');
       const inputRef = useRef(null);
@@ -677,11 +677,8 @@
       }, [showMisc]);
 
       function handleCatClick(cat) {
-        if (cat === 'misc') {
-          setShowMisc(true);
-        } else {
-          onApply(dayName, idx, cat, '');
-        }
+        if (cat === 'misc') { setShowMisc(true); }
+        else { onApply(dayName, idx, cat, ''); }
       }
 
       function handleMiscSave() {
@@ -694,7 +691,7 @@
 
             {/* Header */}
             <p style={{ color: '#71717a', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '4px', fontFamily: 'monospace' }}>
-              Swap this block?
+              This block
             </p>
             <p style={{ color: '#f4f4f5', fontWeight: 600, fontSize: '16px', marginBottom: '2px' }}>
               {block.activity}
@@ -703,36 +700,15 @@
               {block.time}
             </p>
 
-            {/* Custom block: remove + edit time + cancel */}
-            {isCustom && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
-                <button onClick={onRemoveCustom} style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(251,113,133,0.4)', background: 'rgba(251,113,133,0.12)', color: '#fb7185', fontWeight: 600, fontSize: '13px', cursor: 'pointer', fontFamily: 'Georgia, serif' }}>
-                  Remove this block
-                </button>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button className="modal-action-btn" onClick={onEditTime}>Edit time</button>
-                  <button className="modal-action-btn" onClick={onClose}>Cancel</button>
-                </div>
-              </div>
-            )}
-
             {/* Category grid */}
-            {!showMisc && !isCustom && (
+            {!showMisc && (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', marginBottom: '12px' }}>
                 {overrideCats.map(cat => {
                   const hex = categoryAccentHex[cat];
                   const label = cat === 'misc' ? 'Misc / Other…' : categoryLabels[cat];
                   return (
-                    <button
-                      key={cat}
-                      className="modal-cat-btn"
-                      onClick={() => handleCatClick(cat)}
-                      style={{
-                        border: `1px solid ${hex}40`,
-                        background: `${hex}12`,
-                        color: hex,
-                      }}
-                    >
+                    <button key={cat} className="modal-cat-btn" onClick={() => handleCatClick(cat)}
+                      style={{ border: `1px solid ${hex}40`, background: `${hex}12`, color: hex }}>
                       {label}
                     </button>
                   );
@@ -741,38 +717,17 @@
             )}
 
             {/* Misc text input */}
-            {!isCustom && showMisc && (
+            {showMisc && (
               <div style={{ marginBottom: '12px' }}>
                 <p style={{ color: '#a1a1aa', fontSize: '13px', marginBottom: '4px' }}>What did you actually do?</p>
-                <input
-                  ref={inputRef}
-                  type="text"
-                  className="modal-misc-input"
+                <input ref={inputRef} type="text" className="modal-misc-input"
                   placeholder="e.g. Networking calls, errands, phone screen…"
-                  value={miscText}
-                  onChange={e => setMiscText(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') handleMiscSave(); if (e.key === 'Escape') setShowMisc(false); }}
-                />
+                  value={miscText} onChange={e => setMiscText(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleMiscSave(); if (e.key === 'Escape') setShowMisc(false); }} />
                 <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-                  <button
-                    className="modal-action-btn"
-                    onClick={() => setShowMisc(false)}
-                  >
-                    ← Back
-                  </button>
-                  <button
-                    onClick={handleMiscSave}
-                    disabled={!miscText.trim()}
-                    style={{
-                      flex: 1, padding: '9px', borderRadius: '8px',
-                      background: miscText.trim() ? '#a1a1aa' : '#27272a',
-                      color: miscText.trim() ? '#09090b' : '#52525b',
-                      fontWeight: 700, fontSize: '13px',
-                      cursor: miscText.trim() ? 'pointer' : 'default',
-                      border: 'none', fontFamily: 'Georgia, serif',
-                      transition: 'all 0.15s ease',
-                    }}
-                  >
+                  <button className="modal-action-btn" onClick={() => setShowMisc(false)}>← Back</button>
+                  <button onClick={handleMiscSave} disabled={!miscText.trim()}
+                    style={{ flex: 1, padding: '9px', borderRadius: '8px', background: miscText.trim() ? '#a1a1aa' : '#27272a', color: miscText.trim() ? '#09090b' : '#52525b', fontWeight: 700, fontSize: '13px', cursor: miscText.trim() ? 'pointer' : 'default', border: 'none', fontFamily: 'Georgia, serif', transition: 'all 0.15s ease' }}>
                     Save
                   </button>
                 </div>
@@ -780,25 +735,23 @@
             )}
 
             {/* Footer actions */}
-            {!showMisc && !isCustom && (
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                <button className="modal-action-btn" onClick={onEditTime}>
-                  Edit time
+            {!showMisc && (
+              <>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
+                  <button className="modal-action-btn" onClick={onEditTime}>Edit time</button>
+                  {hasOverride && (
+                    <button className="modal-action-btn" onClick={() => onReset(dayName, idx)}>Reset to original</button>
+                  )}
+                  {hasSwap && (
+                    <button className="modal-action-btn" onClick={() => { onResetSwap(); onClose(); }}>Reset day order</button>
+                  )}
+                  <button className="modal-action-btn" onClick={onClose}>Cancel</button>
+                </div>
+                <button onClick={onDelete}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(251,113,133,0.4)', background: 'rgba(251,113,133,0.12)', color: '#fb7185', fontWeight: 600, fontSize: '13px', cursor: 'pointer', fontFamily: 'Georgia, serif' }}>
+                  Delete block
                 </button>
-                {hasOverride && (
-                  <button className="modal-action-btn" onClick={() => onReset(dayName, idx)}>
-                    Reset to original
-                  </button>
-                )}
-                {hasSwap && (
-                  <button className="modal-action-btn" onClick={() => { onResetSwap(); onClose(); }}>
-                    Reset day order
-                  </button>
-                )}
-                <button className="modal-action-btn" onClick={onClose}>
-                  Cancel
-                </button>
-              </div>
+              </>
             )}
           </div>
         </div>
@@ -854,7 +807,7 @@
 
       const [syncStatus, setSyncStatus] = useState(JSONBIN_BIN_ID ? 'loading' : 'unconfigured');
       const syncTimerRef = useRef(null);
-      const dragState = useRef({ sourceIdx: null, dayName: null });
+      const dragState = useRef({ sourceBlock: null, dayName: null });
       const justDropped = useRef(false);
       const [dragOverIdx, setDragOverIdx] = useState(null);
 
@@ -953,13 +906,18 @@
         const key = `${getDateForDay(dayName)}-${idx}`;
         const ov = overrides[key];
         if (!ov) return { ...block, isOverridden: false };
+        // swapActivity is set when a cross-type (hardcoded↔custom) drag swap occurs
+        const activity = ov.swapActivity !== undefined
+          ? ov.swapActivity
+          : (ov.category === 'misc' ? (ov.custom || 'Misc') : categoryLabels[ov.category]);
+        const detail = ov.swapActivity !== undefined
+          ? (ov.swapDetail || '')
+          : (ov.custom || (ov.category !== 'misc' ? block.detail : ''));
         return {
           ...block,
           category: ov.category,
-          activity: ov.category === 'misc'
-            ? (ov.custom || 'Misc')
-            : categoryLabels[ov.category],
-          detail: ov.custom || (ov.category === 'misc' ? '' : block.detail),
+          activity,
+          detail,
           isOverridden: true,
           originalActivity: block.activity,
         };
@@ -992,6 +950,81 @@
         setSwaps(nextSwaps);
         try { localStorage.setItem('schedule-swaps-v1', JSON.stringify(nextSwaps)); } catch {}
         schedulePush(checks, overrides, history, nextSwaps);
+      }
+
+      // Unified swap: handles hardcoded↔hardcoded, custom↔custom, and cross-type
+      function applySwapAny(dayName, blockA, blockB) {
+        const dateStr = getDateForDay(dayName);
+        if (blockA._type === 'hardcoded' && blockB._type === 'hardcoded') {
+          applySwap(dayName, blockA._slotIdx, blockB._slotIdx);
+        } else if (blockA._type === 'custom' && blockB._type === 'custom') {
+          const cbKey = `${dateStr}-${dayName}`;
+          const cbs = customBlocks[cbKey] || [];
+          const a = cbs.find(b => b.id === blockA.id);
+          const b_ = cbs.find(b => b.id === blockB.id);
+          if (!a || !b_) return;
+          const nextCustom = { ...customBlocks, [cbKey]: cbs.map(cb => {
+            if (cb.id === blockA.id) return { ...cb, activity: b_.activity, detail: b_.detail, category: b_.category };
+            if (cb.id === blockB.id) return { ...cb, activity: a.activity, detail: a.detail, category: a.category };
+            return cb;
+          })};
+          // Clear any stale category overrides on both custom blocks so the new content shows cleanly
+          const nextOverrides = { ...overrides };
+          delete nextOverrides[`${dateStr}-cb_${blockA.id}`];
+          delete nextOverrides[`${dateStr}-cb_${blockB.id}`];
+          setOverrides(nextOverrides);
+          setCustomBlocks(nextCustom);
+          try {
+            localStorage.setItem('schedule-overrides-v1', JSON.stringify(nextOverrides));
+            localStorage.setItem('schedule-custom-v1', JSON.stringify(nextCustom));
+          } catch {}
+          schedulePush(checks, nextOverrides, history, swaps, nextCustom, timeMutations);
+        } else {
+          // Cross-type: one hardcoded, one custom
+          const hb = blockA._type === 'hardcoded' ? blockA : blockB;
+          const cb = blockA._type === 'custom' ? blockA : blockB;
+          // Get hardcoded block's current effective content
+          const hardContent = getPermutedContent(dayName, hb._slotIdx);
+          const hardOv = overrides[`${dateStr}-${hb._slotIdx}`];
+          const hardActivity = hardOv
+            ? (hardOv.swapActivity !== undefined ? hardOv.swapActivity : (hardOv.category === 'misc' ? (hardOv.custom || 'Misc') : categoryLabels[hardOv.category]))
+            : hardContent.activity;
+          const hardDetail = hardOv
+            ? (hardOv.swapActivity !== undefined ? (hardOv.swapDetail || '') : (hardOv.custom || hardContent.detail))
+            : hardContent.detail;
+          const hardCat = hardOv ? hardOv.category : hardContent.category;
+          // Override hardcoded slot with custom block's content
+          const nextOverrides = { ...overrides, [`${dateStr}-${hb._slotIdx}`]: {
+            category: cb.category, swapActivity: cb.activity, swapDetail: cb.detail || '',
+          }};
+          // Clear any stale override on the custom block so its new content shows cleanly
+          delete nextOverrides[`${dateStr}-cb_${cb.id}`];
+          // Update custom block with hardcoded's content
+          const cbKey = `${dateStr}-${dayName}`;
+          const nextCustom = { ...customBlocks, [cbKey]: (customBlocks[cbKey] || []).map(b =>
+            b.id === cb.id ? { ...b, activity: hardActivity, detail: hardDetail, category: hardCat } : b
+          )};
+          setOverrides(nextOverrides);
+          setCustomBlocks(nextCustom);
+          try {
+            localStorage.setItem('schedule-overrides-v1', JSON.stringify(nextOverrides));
+            localStorage.setItem('schedule-custom-v1', JSON.stringify(nextCustom));
+          } catch {}
+          schedulePush(checks, nextOverrides, history, swaps, nextCustom, timeMutations);
+        }
+      }
+
+      // Delete any block for the current day (hardcoded: hide via mutation; custom: remove)
+      function deleteBlock(dayName, blockData, dateStr) {
+        if (blockData._type === 'custom') {
+          removeCustomBlock(dayName, dateStr, blockData.id);
+        } else {
+          const mutKey = `${dateStr}-${dayName}-${blockData._slotIdx}`;
+          const nextMuts = { ...timeMutations, [mutKey]: { hidden: true } };
+          setTimeMutations(nextMuts);
+          try { localStorage.setItem('schedule-timemut-v1', JSON.stringify(nextMuts)); } catch {}
+          schedulePush(checks, overrides, history, swaps, customBlocks, nextMuts);
+        }
       }
 
       function computeOverlapTrimming(dayName, dateStr, newStart, newEnd, cbId) {
@@ -1294,7 +1327,18 @@
                     // Apply override on top
                     const ov = overrideKey ? overrides[overrideKey] : (isCustom ? null : overrides[`${dateStr}-${block._slotIdx}`]);
                     const effective = ov
-                      ? { ...contentBlock, category: ov.category, activity: ov.category === 'misc' ? (ov.custom || 'Misc') : categoryLabels[ov.category], detail: ov.custom || contentBlock.detail, isOverridden: true, originalActivity: contentBlock.activity }
+                      ? {
+                          ...contentBlock,
+                          category: ov.category,
+                          // Custom blocks keep their user-given name; override only recolors.
+                          // Exception: if user explicitly renamed via "Misc / Other…" text input.
+                          activity: isCustom
+                            ? (ov.category === 'misc' && ov.custom ? ov.custom : contentBlock.activity)
+                            : (ov.category === 'misc' ? (ov.custom || 'Misc') : categoryLabels[ov.category]),
+                          detail: ov.custom || contentBlock.detail,
+                          isOverridden: true,
+                          originalActivity: contentBlock.activity,
+                        }
                       : { ...contentBlock, isOverridden: false };
 
                     const c = categoryColors[effective.category] || categoryColors.misc;
@@ -1303,28 +1347,34 @@
                     const blockTime = parseBlockTime(block.time);
                     const isNow = activeDay === todayName && blockTime && nowMinutes >= blockTime.start && nowMinutes < blockTime.end;
                     const isBreak = contentBlock.category === 'break' && !effective.isOverridden;
-                    const isDragOver = !isCustom && dragOverIdx === block._slotIdx;
+                    const blockDragKey = isCustom ? `cb_${block.id}` : String(block._slotIdx);
+                    const isDragOver = !isBreak && dragOverIdx === blockDragKey;
 
                     return (
                       <div
                         key={isCustom ? `cb_${block.id}` : block._slotIdx}
-                        draggable={!isCustom && !isBreak}
+                        draggable={!isBreak}
                         className={`block-card rounded-lg border ${c.border} ${c.bg} px-5 py-4 flex items-start gap-4${isDragOver ? ' drag-over' : ''}`}
-                        onDragStart={!isCustom ? () => { dragState.current = { sourceIdx: block._slotIdx, dayName: activeDay }; } : undefined}
-                        onDragOver={!isCustom ? (e => { e.preventDefault(); if (!isBreak && dragState.current.sourceIdx !== block._slotIdx) setDragOverIdx(block._slotIdx); }) : undefined}
-                        onDragLeave={!isCustom ? () => setDragOverIdx(null) : undefined}
-                        onDrop={!isCustom ? (e => {
+                        onDragStart={!isBreak ? () => { dragState.current = { sourceBlock: block, dayName: activeDay }; } : undefined}
+                        onDragOver={!isBreak ? (e => {
+                          e.preventDefault();
+                          const srcKey = dragState.current.sourceBlock ? (dragState.current.sourceBlock._type === 'custom' ? `cb_${dragState.current.sourceBlock.id}` : String(dragState.current.sourceBlock._slotIdx)) : null;
+                          if (srcKey !== blockDragKey) setDragOverIdx(blockDragKey);
+                        }) : undefined}
+                        onDragLeave={!isBreak ? () => setDragOverIdx(null) : undefined}
+                        onDrop={!isBreak ? (e => {
                           e.preventDefault();
                           setDragOverIdx(null);
-                          const { sourceIdx, dayName } = dragState.current;
-                          if (sourceIdx !== null && sourceIdx !== block._slotIdx && dayName === activeDay) {
-                            applySwap(activeDay, sourceIdx, block._slotIdx);
+                          const { sourceBlock, dayName } = dragState.current;
+                          const srcKey = sourceBlock ? (sourceBlock._type === 'custom' ? `cb_${sourceBlock.id}` : String(sourceBlock._slotIdx)) : null;
+                          if (sourceBlock && srcKey !== blockDragKey && dayName === activeDay) {
+                            applySwapAny(activeDay, sourceBlock, block);
                           }
-                          dragState.current = { sourceIdx: null, dayName: null };
+                          dragState.current = { sourceBlock: null, dayName: null };
                           justDropped.current = true;
                           setTimeout(() => { justDropped.current = false; }, 100);
                         }) : undefined}
-                        onDragEnd={!isCustom ? () => { setDragOverIdx(null); dragState.current = { sourceIdx: null, dayName: null }; } : undefined}
+                        onDragEnd={!isBreak ? () => { setDragOverIdx(null); dragState.current = { sourceBlock: null, dayName: null }; } : undefined}
                         onClick={() => {
                           if (justDropped.current) return;
                           if (!isBreak) setEditingBlock({ day: activeDay, idx: isCustom ? `cb_${block.id}` : block._slotIdx, isCustom, customBlock: isCustom ? block : null, renderIdx, blockData: block });
@@ -1423,18 +1473,19 @@
           {/* Override Modal */}
           {editingBlock && (
             <OverrideModal
-              block={editingBlock.isCustom ? editingBlock.customBlock : getPermutedContent(editingBlock.day, editingBlock.idx)}
+              block={(() => {
+                const b = editingBlock.isCustom ? editingBlock.customBlock : getPermutedContent(editingBlock.day, editingBlock.idx);
+                return { ...b, time: editingBlock.blockData.time };
+              })()}
               dayName={editingBlock.day}
               idx={editingBlock.idx}
               overrides={overrides}
               hasSwap={!editingBlock.isCustom && !!swaps[`${getDateForDay(editingBlock.day)}-${editingBlock.day}`]}
-              isCustom={editingBlock.isCustom}
               onApply={applyOverride}
               onReset={resetOverride}
               onResetSwap={() => resetSwap(editingBlock.day)}
-              onRemoveCustom={() => {
-                const cb = editingBlock.customBlock;
-                removeCustomBlock(editingBlock.day, getDateForDay(editingBlock.day), cb.id);
+              onDelete={() => {
+                deleteBlock(editingBlock.day, editingBlock.blockData, getDateForDay(editingBlock.day));
                 setEditingBlock(null);
               }}
               onEditTime={() => {
